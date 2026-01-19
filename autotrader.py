@@ -136,10 +136,19 @@ class AutoTrader:
         self.entry_order: Optional[Order] = None
         self.exit_profit_order: Optional[Order] = None
         self.exit_loss_order: Optional[Order] = None
+        self._profit_price: Optional[float] = None
+        self._loss_price: Optional[float] = None
         self._force_exit_started_at: Optional[float] = None
         self._last_force_exit_poll: Optional[float] = None
 
-    def start_trade(self, entry_order: Order) -> None:
+    @staticmethod
+    def calculate_qty(capital: float, entry_price: float) -> int:
+        """軍資金とエントリー価格から注文数量を算出する（端数切り捨て）。"""
+        if entry_price <= 0:
+            return 0
+        return int(capital // entry_price)
+
+    def start_trade(self, entry_order: Order, profit_price: float, loss_price: float) -> None:
         """取引を開始する。IDLEでない場合はERRORに遷移する。"""
         if self.state != AutoTraderState.IDLE:
             self.state = AutoTraderState.ERROR
@@ -171,13 +180,28 @@ class AutoTrader:
         if not self.entry_order:
             self.state = AutoTraderState.ERROR
             return
+        if self._profit_price is None or self._loss_price is None:
+            # 利確/損切価格が未設定ならエラーにする
+            self.state = AutoTraderState.ERROR
+            return
         # エントリー数量に合わせて両建ての出口注文を作る
-        self.exit_profit_order = Order(role=OrderRole.EXIT_PROFIT, order_type="LIMIT", qty=self.entry_order.qty)
-        self.exit_loss_order = Order(role=OrderRole.EXIT_LOSS, order_type="STOP", qty=self.entry_order.qty)
+        self.exit_profit_order = Order(
+            role=OrderRole.EXIT_PROFIT,
+            order_type="LIMIT",
+            qty=self.entry_order.qty,
+            price=self._profit_price,
+        )
+        self.exit_loss_order = Order(
+            role=OrderRole.EXIT_LOSS,
+            order_type="STOP",
+            qty=self.entry_order.qty,
+            price=self._loss_price,
+        )
         self.orders[self.exit_profit_order.role] = self.exit_profit_order
         self.orders[self.exit_loss_order.role] = self.exit_loss_order
-        self.exit_profit_order.place(self.broker)
+        # OCOがない前提のため、損切→利確の順に送信する
         self.exit_loss_order.place(self.broker)
+        self.exit_profit_order.place(self.broker)
         self.state = AutoTraderState.EXIT_WAIT
 
     def cancel_other_exit_orders(self, filled_order: Order) -> None:

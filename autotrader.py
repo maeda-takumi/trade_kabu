@@ -153,6 +153,8 @@ class AutoTrader:
         if self.state != AutoTraderState.IDLE:
             self.state = AutoTraderState.ERROR
             return
+        self._profit_price = profit_price
+        self._loss_price = loss_price
         # 新規エントリー注文を送信
         self.entry_order = entry_order
         self.orders[entry_order.role] = entry_order
@@ -270,12 +272,17 @@ class AutoTrader:
             self.on_order_event(order, status)
 
 
-def run_demo(poll_interval_sec: float = 0.5, fills_after_polls: int = 2) -> AutoTraderState:
+def run_demo(
+    poll_interval_sec: float = 0.5,
+    fills_after_polls: int = 2,
+    profit_price: float = 105.0,
+    loss_price: float = 95.0,
+) -> AutoTraderState:
     broker = DemoBroker(fills_after_polls=fills_after_polls)
     trader = AutoTrader(broker)
     entry_order = Order(role=OrderRole.ENTRY, order_type="MARKET", qty=1)
     print(f"[demo] state={trader.state.name} -> start_trade")
-    trader.start_trade(entry_order)
+    trader.start_trade(entry_order, profit_price=profit_price, loss_price=loss_price)
     last_state = trader.state
     print(f"[demo] state={last_state.name}")
     while trader.state not in (AutoTraderState.EXIT_FILLED, AutoTraderState.ERROR):

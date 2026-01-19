@@ -271,11 +271,7 @@ class AutoTrader:
             qty=self.entry_order.qty,
             price=self._profit_price,
         )
-        print(
-            "[demo] create exit orders: "
-            f"profit={self.exit_profit_order.order_type} price={self.exit_profit_order.price} qty={self.exit_profit_order.qty}, "
-            f"loss={self.exit_loss_order.order_type} price={self.exit_loss_order.price} qty={self.exit_loss_order.qty}"
-        )        
+        
         self.exit_loss_order = Order(
             role=OrderRole.EXIT_LOSS,
             order_type="STOP",

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from pathlib import Path
+import sqlite3
 import time
 from typing import Dict, Optional
 
@@ -77,21 +79,28 @@ class Order:
     status: OrderStatus = OrderStatus.NEW
     created_at: float = field(default_factory=time.time)
 
-    def place(self, broker: BrokerInterface) -> None:
+    def place(self, broker: BrokerInterface, repository: Optional["OrderRepository"] = None) -> None:
         """ブローカーに注文を送信し、注文IDを保存する。"""
         self.order_id = broker.place_order(self)
         self.status = OrderStatus.SENT
+        if repository:
+            repository.insert_order(self)
 
-    def poll_status(self, broker: BrokerInterface) -> OrderStatus:
+    def poll_status(self, broker: BrokerInterface, repository: Optional["OrderRepository"] = None) -> OrderStatus:
         """ブローカーから最新状態を取得して保持する。"""
+        previous_status = self.status
         self.status = broker.poll_order(self)
+        if repository and self.status != previous_status:
+            repository.update_status(self)
         return self.status
 
-    def cancel(self, broker: BrokerInterface) -> bool:
+    def cancel(self, broker: BrokerInterface, repository: Optional["OrderRepository"] = None) -> bool:
         """ブローカーにキャンセルを依頼し、成功なら状態を更新する。"""
         success = broker.cancel_order(self)
         if success:
             self.status = OrderStatus.CANCELED
+            if repository:
+                repository.update_status(self)
         return success
 
 
@@ -123,13 +132,80 @@ class DemoBroker(BrokerInterface):
         """常にキャンセル成功を返す簡易実装。"""
         return True
 
+class OrderRepository:
+    """注文情報をSQLiteに保存するリポジトリ。"""
+
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.db_path)
+
+    def _init_db(self) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id TEXT UNIQUE,
+                    role TEXT NOT NULL,
+                    order_type TEXT NOT NULL,
+                    qty REAL NOT NULL,
+                    price REAL,
+                    status TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_role ON orders(role)")
+
+    def insert_order(self, order: "Order") -> None:
+        if order.order_id is None:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO orders (
+                    order_id, role, order_type, qty, price, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    order.order_id,
+                    order.role.name,
+                    order.order_type,
+                    order.qty,
+                    order.price,
+                    order.status.name,
+                    order.created_at,
+                ),
+            )
+
+    def update_status(self, order: "Order") -> None:
+        if order.order_id is None:
+            return
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE orders SET status = ? WHERE order_id = ?",
+                (order.status.name, order.order_id),
+            )
+
 
 class AutoTrader:
     """エントリーから決済までを管理する状態機械。"""
 
-    def __init__(self, broker: BrokerInterface, config: Optional[AutoTraderConfig] = None) -> None:
+    def __init__(
+        self,
+        broker: BrokerInterface,
+        config: Optional[AutoTraderConfig] = None,
+        repository: Optional[OrderRepository] = None,
+    ) -> None:
         self.broker = broker
         self.config = config or AutoTraderConfig()
+        default_db_path = Path(__file__).with_name("trade.db")
+        self.repository = repository or OrderRepository(default_db_path)        
         self.state = AutoTraderState.IDLE
         # 役割別の注文をまとめて管理する辞書（同じ役割の注文は最新が入る）
         self.orders: Dict[OrderRole, Order] = {}
@@ -154,11 +230,13 @@ class AutoTrader:
             self.state = AutoTraderState.ERROR
             return
         self._profit_price = profit_price
+        self._loss_price = loss_price        
+        self._profit_price = profit_price
         self._loss_price = loss_price
         # 新規エントリー注文を送信
         self.entry_order = entry_order
         self.orders[entry_order.role] = entry_order
-        entry_order.place(self.broker)
+        entry_order.place(self.broker, repository=self.repository)
         self.state = AutoTraderState.ENTRY_WAIT
 
     def on_order_event(self, order: Order, status: OrderStatus) -> None:
@@ -193,6 +271,11 @@ class AutoTrader:
             qty=self.entry_order.qty,
             price=self._profit_price,
         )
+        print(
+            "[demo] create exit orders: "
+            f"profit={self.exit_profit_order.order_type} price={self.exit_profit_order.price} qty={self.exit_profit_order.qty}, "
+            f"loss={self.exit_loss_order.order_type} price={self.exit_loss_order.price} qty={self.exit_loss_order.qty}"
+        )        
         self.exit_loss_order = Order(
             role=OrderRole.EXIT_LOSS,
             order_type="STOP",
@@ -206,9 +289,10 @@ class AutoTrader:
         )        
         self.orders[self.exit_profit_order.role] = self.exit_profit_order
         self.orders[self.exit_loss_order.role] = self.exit_loss_order
+
         # OCOがない前提のため、損切→利確の順に送信する
-        self.exit_loss_order.place(self.broker)
-        self.exit_profit_order.place(self.broker)
+        self.exit_loss_order.place(self.broker, repository=self.repository)
+        self.exit_profit_order.place(self.broker, repository=self.repository)
         self.state = AutoTraderState.EXIT_WAIT
 
     def cancel_other_exit_orders(self, filled_order: Order) -> None:
@@ -216,7 +300,7 @@ class AutoTrader:
         for role in (OrderRole.EXIT_PROFIT, OrderRole.EXIT_LOSS):
             order = self.orders.get(role)
             if order and order is not filled_order:
-                order.cancel(self.broker)
+                order.cancel(self.broker, repository=self.repository)
 
     def force_exit_market(self) -> None:
         """強制決済（成行）を実行する。"""
@@ -233,7 +317,7 @@ class AutoTrader:
             qty=self.entry_order.qty if self.entry_order else 0,
         )
         self.orders[exit_order.role] = exit_order
-        exit_order.place(self.broker)
+        exit_order.place(self.broker, repository=self.repository)
         self.state = AutoTraderState.FORCE_EXITING
         # 強制決済用のタイムスタンプを記録
         now = time.monotonic()
@@ -244,7 +328,7 @@ class AutoTrader:
         """未約定の注文をすべてキャンセルする。"""
         for order in list(self.orders.values()):
             if order.status not in (OrderStatus.FILLED, OrderStatus.CANCELED):
-                order.cancel(self.broker)
+                order.cancel(self.broker, repository=self.repository)
 
     def poll(self) -> None:
         """状態に応じて注文のポーリング処理を実行する。"""
@@ -267,12 +351,12 @@ class AutoTrader:
             # すでに確定した注文はスキップ
             if order.status in (OrderStatus.FILLED, OrderStatus.CANCELED, OrderStatus.REJECTED, OrderStatus.ERROR):
                 continue
-            status = order.poll_status(self.broker)
+            status = order.poll_status(self.broker, repository=self.repository)
             # 強制決済時に一部約定なら成行を出し直す
             if status == OrderStatus.PARTIAL and self.state == AutoTraderState.FORCE_EXITING:
                 replacement = Order(role=OrderRole.EXIT_MARKET, order_type="MARKET", qty=order.qty)
                 self.orders[replacement.role] = replacement
-                replacement.place(self.broker)
+                replacement.place(self.broker, repository=self.repository)
             # 状態変化に応じた処理へ
             self.on_order_event(order, status)
 

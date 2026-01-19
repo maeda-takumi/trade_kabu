@@ -199,6 +199,11 @@ class AutoTrader:
             qty=self.entry_order.qty,
             price=self._loss_price,
         )
+        print(
+            "[demo] create exit orders: "
+            f"profit={self.exit_profit_order.order_type} price={self.exit_profit_order.price} qty={self.exit_profit_order.qty}, "
+            f"loss={self.exit_loss_order.order_type} price={self.exit_loss_order.price} qty={self.exit_loss_order.qty}"
+        )        
         self.orders[self.exit_profit_order.role] = self.exit_profit_order
         self.orders[self.exit_loss_order.role] = self.exit_loss_order
         # OCOがない前提のため、損切→利確の順に送信する

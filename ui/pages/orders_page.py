@@ -12,11 +12,9 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
-    QPlainTextEdit,
-    QSizePolicy,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -34,7 +32,11 @@ class OrdersPage(QWidget):
         layout = QHBoxLayout(self)
         layout.setSpacing(20)
 
-        left_panel = QVBoxLayout()
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+
+        scroll_contents = QWidget()
+        left_panel = QVBoxLayout(scroll_contents)
         left_panel.setSpacing(18)
 
         self.input_cards_container = QVBoxLayout()
@@ -52,19 +54,9 @@ class OrdersPage(QWidget):
         self._build_controls(self.controls_card.body)
         left_panel.addStretch()
 
-        right_panel = QVBoxLayout()
-        right_panel.setSpacing(18)
+        scroll_area.setWidget(scroll_contents)
 
-        self.status_card = Card("状況")
-        right_panel.addWidget(self.status_card)
-        self._build_status(self.status_card.body)
-
-        self.log_card = Card("ログ")
-        right_panel.addWidget(self.log_card, 1)
-        self._build_logs(self.log_card.body)
-
-        layout.addLayout(left_panel, 3)
-        layout.addLayout(right_panel, 2)
+        layout.addWidget(scroll_area)
 
     def _build_order_count(self, layout: QVBoxLayout) -> None:
         form = QFormLayout()
@@ -180,29 +172,7 @@ class OrdersPage(QWidget):
         button_layout.addWidget(self.stop_button)
         layout.addLayout(button_layout)
 
-    def _build_status(self, layout: QVBoxLayout) -> None:
-        self.state_label = QLabel("IDLE")
-        font = QFont()
-        font.setPointSize(22)
-        font.setBold(True)
-        self.state_label.setFont(font)
-        self.state_label.setObjectName("stateLabel")
-        layout.addWidget(self.state_label)
-
-        self.final_state_label = QLabel("最終結果: -")
-        self.final_state_label.setObjectName("mutedLabel")
-        layout.addWidget(self.final_state_label)
-
-        self.log_hint = QLabel("ログを確認して進行状況を追跡できます")
-        self.log_hint.setObjectName("mutedLabel")
-        layout.addWidget(self.log_hint)
-
-    def _build_logs(self, layout: QVBoxLayout) -> None:
-        self.log_output = QPlainTextEdit()
-        self.log_output.setReadOnly(True)
-        self.log_output.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout.addWidget(self.log_output)
-
+    
     def _toggle_entry_price(self, entry_price_input: QDoubleSpinBox, value: str) -> None:
         is_limit = value == "指値"
         entry_price_input.setVisible(is_limit)

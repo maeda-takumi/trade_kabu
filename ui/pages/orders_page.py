@@ -10,8 +10,10 @@ from PySide6.QtWidgets import (
     QDateTimeEdit,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QLayout,
     QLineEdit,
     QPushButton,
     QScrollArea,
@@ -39,19 +41,21 @@ class OrdersPage(QWidget):
         left_panel = QVBoxLayout(scroll_contents)
         left_panel.setSpacing(18)
 
-        self.input_cards_container = QVBoxLayout()
-        self.input_cards_container.setSpacing(18)
+        self.input_cards_container = QGridLayout()
+        self.input_cards_container.setHorizontalSpacing(18)
+        self.input_cards_container.setVerticalSpacing(18)
         self.order_inputs: list[dict[str, QWidget]] = []
+        self.input_card_columns = 2
+        self.input_card_width = 360
 
         self.order_count_card = Card("注文数")
         left_panel.addWidget(self.order_count_card)
         self._build_order_count(self.order_count_card.body)
 
-        left_panel.addLayout(self.input_cards_container)
-
         self.controls_card = Card("操作")
         left_panel.addWidget(self.controls_card)
         self._build_controls(self.controls_card.body)
+        left_panel.addLayout(self.input_cards_container)
         left_panel.addStretch()
 
         scroll_area.setWidget(scroll_contents)
@@ -187,7 +191,10 @@ class OrdersPage(QWidget):
         for index in range(count):
             title = "注文入力" if index == 0 else f"注文入力 {index + 1}"
             card = Card(title)
-            self.input_cards_container.addWidget(card)
+            card.setFixedWidth(self.input_card_width)
+            row = index // self.input_card_columns
+            col = index % self.input_card_columns
+            self.input_cards_container.addWidget(card, row, col)
             inputs = self._build_inputs(card.body)
             self.order_inputs.append(inputs)
 
@@ -202,10 +209,13 @@ class OrdersPage(QWidget):
                 self.schedule_time_input = inputs["schedule_time_input"]
                 self.poll_interval_input = inputs["poll_interval_input"]
                 self.fills_after_input = inputs["fills_after_input"]
-        self.input_cards_container.addStretch()
+        self.input_cards_container.setColumnStretch(self.input_card_columns, 1)
+        self.input_cards_container.setRowStretch(
+            (count - 1) // self.input_card_columns + 1, 1
+        )
 
     @staticmethod
-    def _clear_layout(layout: QVBoxLayout) -> None:
+    def _clear_layout(layout: QLayout) -> None:
         while layout.count():
             item = layout.takeAt(0)
             widget = item.widget()

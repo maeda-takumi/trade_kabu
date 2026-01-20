@@ -37,15 +37,15 @@ class OrdersPage(QWidget):
         left_panel = QVBoxLayout()
         left_panel.setSpacing(18)
 
+        self.input_cards_container = QVBoxLayout()
+        self.input_cards_container.setSpacing(18)
+        self.order_inputs: list[dict[str, QWidget]] = []
+
         self.order_count_card = Card("注文数")
         left_panel.addWidget(self.order_count_card)
         self._build_order_count(self.order_count_card.body)
 
-        self.input_cards_container = QVBoxLayout()
-        self.input_cards_container.setSpacing(18)
         left_panel.addLayout(self.input_cards_container)
-        self.order_inputs: list[dict[str, QWidget]] = []
-        self._update_order_cards(self.order_count_input.value())
 
         self.controls_card = Card("操作")
         left_panel.addWidget(self.controls_card)
@@ -78,8 +78,7 @@ class OrdersPage(QWidget):
         form.addRow("注文数", self.order_count_input)
 
         layout.addLayout(form)
-        self._toggle_entry_price(self.order_type_input.currentText())
-        self._toggle_schedule(self.schedule_type_input.currentText())
+        self._update_order_cards(self.order_count_input.value())
 
     def _build_inputs(self, layout: QVBoxLayout) -> dict[str, QWidget]:
         form = QFormLayout()
@@ -166,6 +165,7 @@ class OrdersPage(QWidget):
             "poll_interval_input": poll_interval_input,
             "fills_after_input": fills_after_input,
         }
+
     def _build_controls(self, layout: QVBoxLayout) -> None:
         button_layout = QHBoxLayout()
         self.start_button = QPushButton("デモ開始")
@@ -210,6 +210,7 @@ class OrdersPage(QWidget):
     def _toggle_schedule(self, schedule_time_input: QDateTimeEdit, value: str) -> None:
         is_reserved = value == "予約"
         schedule_time_input.setVisible(is_reserved)
+
     def _update_order_cards(self, count: int) -> None:
         self._clear_layout(self.input_cards_container)
         self.order_inputs.clear()
@@ -242,4 +243,4 @@ class OrdersPage(QWidget):
             if widget is not None:
                 widget.setParent(None)
             elif child_layout is not None:
-                OrdersPage._clear_layout(child_layout)        
+                OrdersPage._clear_layout(child_layout)

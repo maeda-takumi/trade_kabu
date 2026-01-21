@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QListWidget,
     QListWidgetItem,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -51,6 +52,28 @@ STATUS_VARIANTS = {
     "FORCE_EXITING": "warning",
     "EXIT_FILLED": "success",
     "CANCELED": "neutral",
+    "ERROR": "danger",
+}
+
+ORDER_STATUS_LABELS = {
+    "NOT_SENT": "未送信",
+    "NEW": "新規",
+    "SENT": "送信済",
+    "PARTIAL": "一部約定",
+    "FILLED": "約定済",
+    "CANCELED": "キャンセル",
+    "REJECTED": "拒否",
+    "ERROR": "エラー",
+}
+
+ORDER_STATUS_VARIANTS = {
+    "NOT_SENT": "neutral",
+    "NEW": "neutral",
+    "SENT": "info",
+    "PARTIAL": "warning",
+    "FILLED": "success",
+    "CANCELED": "neutral",
+    "REJECTED": "danger",
     "ERROR": "danger",
 }
 
@@ -93,6 +116,21 @@ class StatusRowWidget(QFrame):
         chips_row.addStretch()
         layout.addLayout(chips_row)
 
+        detail_row = QHBoxLayout()
+        detail_row.setSpacing(12)
+        profit_label = QLabel("利確注文")
+        profit_label.setObjectName("statusMeta")
+        detail_row.addWidget(profit_label)
+        self.profit_badge = self._make_badge("-", "neutral")
+        detail_row.addWidget(self.profit_badge)
+        detail_row.addStretch()
+        loss_label = QLabel("損切注文")
+        loss_label.setObjectName("statusMeta")
+        detail_row.addWidget(loss_label)
+        self.loss_badge = self._make_badge("-", "neutral")
+        detail_row.addWidget(self.loss_badge)
+        layout.addLayout(detail_row)
+
         footer_row = QHBoxLayout()
         footer_row.setSpacing(8)
         footer_label = QLabel("最終結果")
@@ -128,6 +166,19 @@ class StatusRowWidget(QFrame):
         self.final_badge.style().unpolish(self.final_badge)
         self.final_badge.style().polish(self.final_badge)
 
+    def update_exit_status(
+        self, profit_label: str, profit_variant: str, loss_label: str, loss_variant: str
+    ) -> None:
+        self.profit_badge.setText(profit_label)
+        self.profit_badge.setProperty("variant", profit_variant)
+        self.profit_badge.style().unpolish(self.profit_badge)
+        self.profit_badge.style().polish(self.profit_badge)
+
+        self.loss_badge.setText(loss_label)
+        self.loss_badge.setProperty("variant", loss_variant)
+        self.loss_badge.style().unpolish(self.loss_badge)
+        self.loss_badge.style().polish(self.loss_badge)
+
 class OrdersPage(QWidget):
     start_requested = Signal()
     stop_requested = Signal()
@@ -149,7 +200,7 @@ class OrdersPage(QWidget):
         self.input_cards_container.setVerticalSpacing(18)
         self.order_inputs: list[dict[str, QWidget]] = []
         self.input_card_columns = 2
-        self.input_card_width = 360
+        self.input_card_width = 480
 
         self.order_count_card = Card("注文数")
         left_panel.addWidget(self.order_count_card)
@@ -170,10 +221,6 @@ class OrdersPage(QWidget):
         self.status_card = Card("状態")
         right_panel.addWidget(self.status_card)
         self._build_status(self.status_card.body)
-
-        self.log_card = Card("ログ")
-        right_panel.addWidget(self.log_card)
-        self._build_log(self.log_card.body)
 
         right_panel.addStretch()
         layout.addLayout(right_panel, 1)
@@ -299,19 +346,18 @@ class OrdersPage(QWidget):
         self.status_list.setSpacing(12)
         layout.addWidget(self.status_list)
         self.status_rows: list[StatusRowWidget] = []
+        self.status_items: list[QListWidgetItem] = []
 
-    def _build_log(self, layout: QVBoxLayout) -> None:
-        self.log_output = QPlainTextEdit()
-        self.log_output.setReadOnly(True)
-        self.log_output.setMinimumHeight(320)
-        layout.addWidget(self.log_output)
-        
     def reset_status_rows(self, rows: list[dict[str, str]]) -> None:
         self.status_list.clear()
         self.status_rows.clear()
+        self.status_items.clear()
         for data in rows:
             state_label, state_variant = self._localize_state("READY")
             final_label, final_variant = self._localize_state("-")
+            profit_label, profit_variant = self._localize_order_status("NOT_SENT")
+            loss_label, loss_variant = self._localize_order_status("NOT_SENT")
+
             widget = StatusRowWidget(
                 index=data.get("index", "-"),
                 symbol=data.get("symbol", "-"),
@@ -323,17 +369,32 @@ class OrdersPage(QWidget):
                 final_label=final_label,
                 final_variant=final_variant,
             )
+            widget.update_exit_status(
+                profit_label, profit_variant, loss_label, loss_variant
+            )
             item = QListWidgetItem()
             item.setSizeHint(widget.sizeHint())
             self.status_list.addItem(item)
             self.status_list.setItemWidget(item, widget)
             self.status_rows.append(widget)
+            self.status_items.append(item)
 
     def update_status_row(self, row_index: int, state: str) -> None:
         if row_index < 0 or row_index >= len(self.status_rows):
             return
         label, variant = self._localize_state(state)
         self.status_rows[row_index].update_state(label, variant)
+        self._refresh_status_item(row_index)
+
+    def update_exit_rows(self, row_index: int, profit_status: str, loss_status: str) -> None:
+        if row_index < 0 or row_index >= len(self.status_rows):
+            return
+        profit_label, profit_variant = self._localize_order_status(profit_status)
+        loss_label, loss_variant = self._localize_order_status(loss_status)
+        self.status_rows[row_index].update_exit_status(
+            profit_label, profit_variant, loss_label, loss_variant
+        )
+        self._refresh_status_item(row_index)
 
     def update_final_row(self, row_index: int, state: str) -> None:
         if row_index < 0 or row_index >= len(self.status_rows):
@@ -355,6 +416,18 @@ class OrdersPage(QWidget):
         variant = STATUS_VARIANTS.get(key, "neutral")
         return label, variant
     
+    def _localize_order_status(self, status: str) -> tuple[str, str]:
+        key = status.upper() if status else "NOT_SENT"
+        label = ORDER_STATUS_LABELS.get(key, status if status else "-")
+        variant = ORDER_STATUS_VARIANTS.get(key, "neutral")
+        return label, variant
+
+    def _refresh_status_item(self, row_index: int) -> None:
+        if row_index < 0 or row_index >= len(self.status_items):
+            return
+        item = self.status_items[row_index]
+        widget = self.status_rows[row_index]
+        item.setSizeHint(widget.sizeHint())
     def _update_order_cards(self, count: int) -> None:
         self._clear_layout(self.input_cards_container)
         self.order_inputs.clear()

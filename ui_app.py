@@ -15,7 +15,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("AutoTrader Demo UI")
-        self.setMinimumSize(1750, 950)
+        self.setMinimumSize(1900, 950)
         self.workers: list[DemoWorker] = []
 
         root = QWidget()

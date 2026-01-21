@@ -190,7 +190,7 @@ class OrdersPage(QWidget):
         button_layout.addWidget(self.start_button)
         button_layout.addWidget(self.stop_button)
         layout.addLayout(button_layout)
-        
+
     def _build_status(self, layout: QVBoxLayout) -> None:
         self.state_label = QLabel("現在状態: -")
         self.state_label.setObjectName("stateLabel")

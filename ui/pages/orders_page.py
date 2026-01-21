@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDateTimeEdit,
@@ -94,6 +94,7 @@ class StatusRowWidget(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("statusItem")
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(8)
@@ -190,6 +191,7 @@ class OrdersPage(QWidget):
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         scroll_contents = QWidget()
         left_panel = QVBoxLayout(scroll_contents)
@@ -214,6 +216,10 @@ class OrdersPage(QWidget):
 
         scroll_area.setWidget(scroll_contents)
 
+        layout.addWidget(scroll_area, 3)
+        right_panel_container = QWidget()
+        right_panel_container.setMaximumWidth(520)
+        right_panel = QVBoxLayout(right_panel_container)
         layout.addWidget(scroll_area)
         right_panel = QVBoxLayout()
         right_panel.setSpacing(18)
@@ -223,7 +229,7 @@ class OrdersPage(QWidget):
         self._build_status(self.status_card.body)
 
         right_panel.addStretch()
-        layout.addLayout(right_panel, 1)
+        layout.addWidget(right_panel_container, 1)
 
     def _build_order_count(self, layout: QVBoxLayout) -> None:
         form = QFormLayout()
@@ -452,7 +458,8 @@ class OrdersPage(QWidget):
                 self.schedule_time_input = inputs["schedule_time_input"]
                 self.poll_interval_input = inputs["poll_interval_input"]
                 self.fills_after_input = inputs["fills_after_input"]
-        self.input_cards_container.setColumnStretch(self.input_card_columns, 1)
+        for col in range(self.input_card_columns):
+            self.input_cards_container.setColumnStretch(col, 1)
         self.input_cards_container.setRowStretch(
             (count - 1) // self.input_card_columns + 1, 1
         )

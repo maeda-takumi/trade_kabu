@@ -38,6 +38,7 @@ class DemoInputs:
 class DemoWorker(QThread):
     log_message = Signal(str)
     state_changed = Signal(str)
+    exit_status_changed = Signal(str, str)
     finished_state = Signal(str)
 
     def __init__(self, inputs: DemoInputs, parent: Optional[object] = None) -> None:
@@ -109,8 +110,10 @@ class DemoWorker(QThread):
         last_state = trader.state
         self.state_changed.emit(trader.state.name)
         self.log_message.emit(f"[demo] state={trader.state.name}")
+        self._emit_exit_statuses(trader, None)
 
         stopping = False
+        last_exit_statuses: Optional[tuple[str, str]] = None
         while trader.state not in (AutoTraderState.EXIT_FILLED, AutoTraderState.ERROR):
             if self._stop_requested:
                 self.log_message.emit("[demo] stop requested by user")
@@ -135,8 +138,28 @@ class DemoWorker(QThread):
                 )
                 last_state = trader.state
                 self.state_changed.emit(trader.state.name)
+            current_exit_statuses = self._emit_exit_statuses(trader, last_exit_statuses)
+            if current_exit_statuses is not None:
+                last_exit_statuses = current_exit_statuses
             time.sleep(self.inputs.poll_interval_sec)
 
         self.log_message.emit(f"[demo] completed with state={trader.state.name}")
         self.state_changed.emit(trader.state.name)
+        self._emit_exit_statuses(trader, last_exit_statuses)
         self.finished_state.emit(trader.state.name)
+
+    def _emit_exit_statuses(
+        self, trader: AutoTrader, previous: Optional[tuple[str, str]]
+    ) -> Optional[tuple[str, str]]:
+        profit_status = (
+            trader.exit_profit_order.status.name
+            if trader.exit_profit_order
+            else "NOT_SENT"
+        )
+        loss_status = (
+            trader.exit_loss_order.status.name if trader.exit_loss_order else "NOT_SENT"
+        )
+        current = (profit_status, loss_status)
+        if current != previous:
+            self.exit_status_changed.emit(*current)
+        return current

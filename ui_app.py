@@ -129,6 +129,59 @@ class MainWindow(QMainWindow):
                 font-size: 12px;
                 font-weight: 600;
             }
+            QLabel#statusBadge[variant="info"] {
+                background: #DBEAFE;
+                color: #1D4ED8;
+            }
+            QLabel#statusBadge[variant="success"] {
+                background: #DCFCE7;
+                color: #166534;
+            }
+            QLabel#statusBadge[variant="danger"] {
+                background: #FEE2E2;
+                color: #991B1B;
+            }
+            QLabel#statusBadge[variant="warning"] {
+                background: #FEF3C7;
+                color: #92400E;
+            }
+            QLabel#statusBadge[variant="neutral"] {
+                background: #E2E8F0;
+                color: #334155;
+            }
+            QListWidget#statusList {
+                background: transparent;
+                border: none;
+            }
+            QFrame#statusItem {
+                background-color: #FFFFFF;
+                border: 1px solid #E5E7EB;
+                border-radius: 16px;
+            }
+            QLabel#statusTitle {
+                font-size: 15px;
+                font-weight: 600;
+                color: #0F172A;
+            }
+            QLabel#statusMeta {
+                color: #64748B;
+                font-size: 12px;
+            }
+            QLabel#statusChip {
+                background: #E2E8F0;
+                color: #334155;
+                border-radius: 10px;
+                padding: 2px 8px;
+                font-size: 12px;
+            }
+            QLabel#statusBadge {
+                background: #DBEAFE;
+                color: #1D4ED8;
+                border-radius: 10px;
+                padding: 2px 10px;
+                font-size: 12px;
+                font-weight: 600;
+            }
             QLabel#statusBadge[variant="success"] {
                 background: #DCFCE7;
                 color: #166534;
@@ -226,7 +279,6 @@ class MainWindow(QMainWindow):
         if any(worker.isRunning() for worker in self.workers):
             return
         inputs_list = self._collect_inputs()
-        self.orders_page.log_output.clear()
         self.workers.clear()
         rows = []
         for index, inputs in enumerate(inputs_list, start=1):
@@ -243,14 +295,16 @@ class MainWindow(QMainWindow):
 
         for index, inputs in enumerate(inputs_list):
             worker = DemoWorker(inputs)
-            worker.log_message.connect(
-                lambda message, row=index: self._append_log(row, message)
-            )
             worker.state_changed.connect(
                 lambda state, row=index: self.orders_page.update_status_row(row, state)
             )
             worker.finished_state.connect(
                 lambda state, row=index: self._on_demo_finished(row, state)
+            )
+            worker.exit_status_changed.connect(
+                lambda profit, loss, row=index: self.orders_page.update_exit_rows(
+                    row, profit, loss
+                )
             )
             worker.start()
             self.workers.append(worker)
@@ -262,9 +316,6 @@ class MainWindow(QMainWindow):
         for worker in self.workers:
             worker.stop()
         self.orders_page.stop_button.setEnabled(False)
-
-    def _append_log(self, row: int, message: str) -> None:
-        self.orders_page.log_output.appendPlainText(f"[注文{row + 1}] {message}")
 
     def _on_demo_finished(self, row: int, state: str) -> None:
         self.orders_page.update_final_row(row, state)

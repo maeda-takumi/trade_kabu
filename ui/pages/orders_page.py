@@ -202,7 +202,6 @@ class OrdersPage(QWidget):
         self.input_cards_container.setVerticalSpacing(18)
         self.order_inputs: list[dict[str, QWidget]] = []
         self.input_card_columns = 2
-        self.input_card_width = 480
 
         self.order_count_card = Card("注文数")
         left_panel.addWidget(self.order_count_card)
@@ -218,10 +217,12 @@ class OrdersPage(QWidget):
 
         layout.addWidget(scroll_area, 3)
         right_panel_container = QWidget()
+        right_panel_container.setMinimumWidth(360)
         right_panel_container.setMaximumWidth(520)
+        right_panel_container.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
         right_panel = QVBoxLayout(right_panel_container)
-        layout.addWidget(scroll_area)
-        right_panel = QVBoxLayout()
         right_panel.setSpacing(18)
 
         self.status_card = Card("状態")
@@ -407,7 +408,8 @@ class OrdersPage(QWidget):
             return
         label, variant = self._localize_state(state)
         self.status_rows[row_index].update_final(label, variant)
-        
+        self._refresh_status_item(row_index)
+
     def _toggle_entry_price(self, entry_price_input: QDoubleSpinBox, value: str) -> None:
         is_limit = value == "指値"
         entry_price_input.setVisible(is_limit)
@@ -434,13 +436,13 @@ class OrdersPage(QWidget):
         item = self.status_items[row_index]
         widget = self.status_rows[row_index]
         item.setSizeHint(widget.sizeHint())
+
     def _update_order_cards(self, count: int) -> None:
         self._clear_layout(self.input_cards_container)
         self.order_inputs.clear()
         for index in range(count):
             title = "注文入力" if index == 0 else f"注文入力 {index + 1}"
             card = Card(title)
-            card.setFixedWidth(self.input_card_width)
             row = index // self.input_card_columns
             col = index % self.input_card_columns
             self.input_cards_container.addWidget(card, row, col)

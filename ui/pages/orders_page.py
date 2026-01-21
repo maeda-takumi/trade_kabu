@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -192,19 +194,45 @@ class OrdersPage(QWidget):
         layout.addLayout(button_layout)
 
     def _build_status(self, layout: QVBoxLayout) -> None:
-        self.state_label = QLabel("現在状態: -")
-        self.state_label.setObjectName("stateLabel")
-        self.final_state_label = QLabel("最終結果: -")
-        self.final_state_label.setObjectName("mutedLabel")
-        layout.addWidget(self.state_label)
-        layout.addWidget(self.final_state_label)
+        self.status_table = QTableWidget(0, 7)
+        self.status_table.setHorizontalHeaderLabels(
+            ["番号", "銘柄", "売買", "注文種別", "実行区分", "現在状態", "最終結果"]
+        )
+        self.status_table.verticalHeader().setVisible(False)
+        self.status_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.status_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.status_table.setAlternatingRowColors(True)
+        self.status_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.status_table)
 
     def _build_log(self, layout: QVBoxLayout) -> None:
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setMinimumHeight(320)
         layout.addWidget(self.log_output)
-    
+        
+    def reset_status_rows(self, rows: list[dict[str, str]]) -> None:
+        self.status_table.setRowCount(len(rows))
+        for row_index, data in enumerate(rows):
+            self.status_table.setItem(row_index, 0, QTableWidgetItem(data.get("index", "-")))
+            self.status_table.setItem(row_index, 1, QTableWidgetItem(data.get("symbol", "-")))
+            self.status_table.setItem(row_index, 2, QTableWidgetItem(data.get("side", "-")))
+            self.status_table.setItem(row_index, 3, QTableWidgetItem(data.get("order_type", "-")))
+            self.status_table.setItem(row_index, 4, QTableWidgetItem(data.get("schedule", "-")))
+            self.status_table.setItem(row_index, 5, QTableWidgetItem("準備中"))
+            self.status_table.setItem(row_index, 6, QTableWidgetItem("-"))
+        self.status_table.resizeColumnsToContents()
+
+    def update_status_row(self, row_index: int, state: str) -> None:
+        if row_index < 0 or row_index >= self.status_table.rowCount():
+            return
+        self.status_table.setItem(row_index, 5, QTableWidgetItem(state))
+
+    def update_final_row(self, row_index: int, state: str) -> None:
+        if row_index < 0 or row_index >= self.status_table.rowCount():
+            return
+        self.status_table.setItem(row_index, 6, QTableWidgetItem(state))
+        
     def _toggle_entry_price(self, entry_price_input: QDoubleSpinBox, value: str) -> None:
         is_limit = value == "指値"
         entry_price_input.setVisible(is_limit)

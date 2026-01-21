@@ -16,7 +16,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("AutoTrader Demo UI")
         self.setMinimumSize(1750, 950)
-        self.worker: DemoWorker | None = None
+        self.workers: list[DemoWorker] = []
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -140,59 +140,88 @@ class MainWindow(QMainWindow):
             """
         )
 
-    def _collect_inputs(self) -> DemoInputs:
-        entry_order_type = (
-            "MARKET" if self.orders_page.order_type_input.currentText() == "成行" else "LIMIT"
-        )
-        entry_price = (
-            self.orders_page.entry_price_input.value() if entry_order_type == "LIMIT" else None
-        )
-        schedule_type = self.orders_page.schedule_type_input.currentText()
-        scheduled_epoch = None
-        if schedule_type == "予約":
-            scheduled_epoch = self.orders_page.schedule_time_input.dateTime().toSecsSinceEpoch()
-        return DemoInputs(
-            symbol_code=self.orders_page.symbol_input.text().strip() or "N/A",
-            entry_order_type=entry_order_type,
-            entry_price=entry_price,
-            profit_price=self.orders_page.profit_price_input.value(),
-            loss_price=self.orders_page.loss_price_input.value(),
-            schedule_type=schedule_type,
-            scheduled_epoch=scheduled_epoch,
-            side=self.orders_page.side_input.currentText(),
-            poll_interval_sec=self.orders_page.poll_interval_input.value(),
-            fills_after_polls=self.orders_page.fills_after_input.value(),
-            force_exit_poll_interval_sec=self.settings_page.force_poll_interval_input.value(),
-            force_exit_max_duration_sec=self.settings_page.force_max_duration_input.value(),
-            force_exit_start_before_close_min=self.settings_page.force_start_before_input.value(),
-            force_exit_deadline_before_close_min=self.settings_page.force_deadline_before_input.value(),
-        )
+    def _collect_inputs(self) -> list[DemoInputs]:
+        inputs: list[DemoInputs] = []
+        for input_set in self.orders_page.order_inputs:
+            entry_order_type = (
+                "MARKET" if input_set["order_type_input"].currentText() == "成行" else "LIMIT"
+            )
+            entry_price = (
+                input_set["entry_price_input"].value() if entry_order_type == "LIMIT" else None
+            )
+            schedule_type = input_set["schedule_type_input"].currentText()
+            scheduled_epoch = None
+            if schedule_type == "予約":
+                scheduled_epoch = input_set["schedule_time_input"].dateTime().toSecsSinceEpoch()
+            inputs.append(
+                DemoInputs(
+                    symbol_code=input_set["symbol_input"].text().strip() or "N/A",
+                    entry_order_type=entry_order_type,
+                    entry_price=entry_price,
+                    profit_price=input_set["profit_price_input"].value(),
+                    loss_price=input_set["loss_price_input"].value(),
+                    schedule_type=schedule_type,
+                    scheduled_epoch=scheduled_epoch,
+                    side=input_set["side_input"].currentText(),
+                    poll_interval_sec=input_set["poll_interval_input"].value(),
+                    fills_after_polls=input_set["fills_after_input"].value(),
+                    force_exit_poll_interval_sec=self.settings_page.force_poll_interval_input.value(),
+                    force_exit_max_duration_sec=self.settings_page.force_max_duration_input.value(),
+                    force_exit_start_before_close_min=self.settings_page.force_start_before_input.value(),
+                    force_exit_deadline_before_close_min=self.settings_page.force_deadline_before_input.value(),
+                )
+            )
+        return inputs
 
     def _start_demo(self) -> None:
-        if self.worker and self.worker.isRunning():
+        if any(worker.isRunning() for worker in self.workers):
             return
-        inputs = self._collect_inputs()
+        inputs_list = self._collect_inputs()
         self.orders_page.log_output.clear()
-        self.orders_page.final_state_label.setText("最終結果: -")
+        self.workers.clear()
+        rows = []
+        for index, inputs in enumerate(inputs_list, start=1):
+            rows.append(
+                {
+                    "index": str(index),
+                    "symbol": inputs.symbol_code,
+                    "side": inputs.side,
+                    "order_type": "成行" if inputs.entry_order_type == "MARKET" else "指値",
+                    "schedule": inputs.schedule_type,
+                }
+            )
+        self.orders_page.reset_status_rows(rows)
 
-        self.worker = DemoWorker(inputs)
-        self.worker.log_message.connect(self.orders_page.log_output.appendPlainText)
-        self.worker.state_changed.connect(self.orders_page.state_label.setText)
-        self.worker.finished_state.connect(self._on_demo_finished)
-        self.worker.start()
+        for index, inputs in enumerate(inputs_list):
+            worker = DemoWorker(inputs)
+            worker.log_message.connect(
+                lambda message, row=index: self._append_log(row, message)
+            )
+            worker.state_changed.connect(
+                lambda state, row=index: self.orders_page.update_status_row(row, state)
+            )
+            worker.finished_state.connect(
+                lambda state, row=index: self._on_demo_finished(row, state)
+            )
+            worker.start()
+            self.workers.append(worker)
 
         self.orders_page.start_button.setEnabled(False)
         self.orders_page.stop_button.setEnabled(True)
 
     def _stop_demo(self) -> None:
-        if self.worker:
-            self.worker.stop()
+        for worker in self.workers:
+            worker.stop()
         self.orders_page.stop_button.setEnabled(False)
 
-    def _on_demo_finished(self, state: str) -> None:
-        self.orders_page.final_state_label.setText(f"最終結果: {state}")
-        self.orders_page.start_button.setEnabled(True)
-        self.orders_page.stop_button.setEnabled(False)
+    def _append_log(self, row: int, message: str) -> None:
+        self.orders_page.log_output.appendPlainText(f"[注文{row + 1}] {message}")
+
+    def _on_demo_finished(self, row: int, state: str) -> None:
+        self.orders_page.update_final_row(row, state)
+        if all(not worker.isRunning() for worker in self.workers):
+            self.orders_page.start_button.setEnabled(True)
+            self.orders_page.stop_button.setEnabled(False)
 
 
 def main() -> None:

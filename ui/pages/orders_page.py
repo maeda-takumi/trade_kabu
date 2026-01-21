@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import Optional
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QComboBox,
     QDateTimeEdit,
@@ -14,13 +13,16 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLayout,
+    QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
+
 
 from ui.widgets.card import Card
 
@@ -61,6 +63,19 @@ class OrdersPage(QWidget):
         scroll_area.setWidget(scroll_contents)
 
         layout.addWidget(scroll_area)
+        right_panel = QVBoxLayout()
+        right_panel.setSpacing(18)
+
+        self.status_card = Card("状態")
+        right_panel.addWidget(self.status_card)
+        self._build_status(self.status_card.body)
+
+        self.log_card = Card("ログ")
+        right_panel.addWidget(self.log_card)
+        self._build_log(self.log_card.body)
+
+        right_panel.addStretch()
+        layout.addLayout(right_panel, 1)
 
     def _build_order_count(self, layout: QVBoxLayout) -> None:
         form = QFormLayout()
@@ -175,7 +190,20 @@ class OrdersPage(QWidget):
         button_layout.addWidget(self.start_button)
         button_layout.addWidget(self.stop_button)
         layout.addLayout(button_layout)
+        
+    def _build_status(self, layout: QVBoxLayout) -> None:
+        self.state_label = QLabel("現在状態: -")
+        self.state_label.setObjectName("stateLabel")
+        self.final_state_label = QLabel("最終結果: -")
+        self.final_state_label.setObjectName("mutedLabel")
+        layout.addWidget(self.state_label)
+        layout.addWidget(self.final_state_label)
 
+    def _build_log(self, layout: QVBoxLayout) -> None:
+        self.log_output = QPlainTextEdit()
+        self.log_output.setReadOnly(True)
+        self.log_output.setMinimumHeight(320)
+        layout.addWidget(self.log_output)
     
     def _toggle_entry_price(self, entry_price_input: QDoubleSpinBox, value: str) -> None:
         is_limit = value == "指値"

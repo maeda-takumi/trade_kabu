@@ -69,12 +69,17 @@ class DemoWorker(QThread):
         )
         broker = DemoBroker(fills_after_polls=self.inputs.fills_after_polls)
         trader = AutoTrader(broker, config=config)
-
+        entry_price = (
+            self.inputs.entry_price if self.inputs.entry_order_type == "LIMIT" else None
+        )        
+        entry_price = (
+            self.inputs.entry_price if self.inputs.entry_order_type == "LIMIT" else None
+        )
         entry_order = Order(
             role=OrderRole.ENTRY,
             order_type=self.inputs.entry_order_type,
             qty=1,
-            price=self.inputs.entry_price,
+            price=entry_price,
         )
 
         self.log_message.emit(
@@ -92,6 +97,8 @@ class DemoWorker(QThread):
             if not self._wait_until_scheduled():
                 self.finished_state.emit("CANCELED")
                 return
+        else:
+            self.log_message.emit("[demo] start immediately")
 
         self.log_message.emit(f"[demo] state={trader.state.name} -> start_trade")
         trader.start_trade(
@@ -103,10 +110,24 @@ class DemoWorker(QThread):
         self.state_changed.emit(trader.state.name)
         self.log_message.emit(f"[demo] state={trader.state.name}")
 
+        stopping = False
         while trader.state not in (AutoTraderState.EXIT_FILLED, AutoTraderState.ERROR):
             if self._stop_requested:
                 self.log_message.emit("[demo] stop requested by user")
-                break
+                if trader.state in (AutoTraderState.IDLE, AutoTraderState.ENTRY_WAIT):
+                    trader.cancel_all_orders()
+                    self.state_changed.emit(trader.state.name)
+                    self.finished_state.emit("CANCELED")
+                    return
+                if not stopping:
+                    trader.force_exit_market()
+                    stopping = True
+                    if trader.state != last_state:
+                        self.log_message.emit(
+                            f"[demo] state={last_state.name} -> {trader.state.name}"
+                        )
+                        last_state = trader.state
+                        self.state_changed.emit(trader.state.name)
             trader.poll()
             if trader.state != last_state:
                 self.log_message.emit(

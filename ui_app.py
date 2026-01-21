@@ -96,6 +96,55 @@ class MainWindow(QMainWindow):
                 background-color: #FFFFFF;
                 border-radius: 18px;
             }
+            QListWidget#statusList {
+                background: transparent;
+                border: none;
+            }
+            QFrame#statusItem {
+                background-color: #FFFFFF;
+                border: 1px solid #E5E7EB;
+                border-radius: 16px;
+            }
+            QLabel#statusTitle {
+                font-size: 15px;
+                font-weight: 600;
+                color: #0F172A;
+            }
+            QLabel#statusMeta {
+                color: #64748B;
+                font-size: 12px;
+            }
+            QLabel#statusChip {
+                background: #E2E8F0;
+                color: #334155;
+                border-radius: 10px;
+                padding: 2px 8px;
+                font-size: 12px;
+            }
+            QLabel#statusBadge {
+                background: #DBEAFE;
+                color: #1D4ED8;
+                border-radius: 10px;
+                padding: 2px 10px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QLabel#statusBadge[variant="success"] {
+                background: #DCFCE7;
+                color: #166534;
+            }
+            QLabel#statusBadge[variant="danger"] {
+                background: #FEE2E2;
+                color: #991B1B;
+            }
+            QLabel#statusBadge[variant="warning"] {
+                background: #FEF3C7;
+                color: #92400E;
+            }
+            QLabel#statusBadge[variant="neutral"] {
+                background: #E2E8F0;
+                color: #334155;
+            }
             QLabel#cardTitle {
                 font-size: 16px;
                 font-weight: 600;

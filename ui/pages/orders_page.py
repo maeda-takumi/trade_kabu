@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateTimeEdit,
     QDoubleSpinBox,
+    QFrame,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -19,8 +20,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
-    QTableWidget,
-    QTableWidgetItem,
+    QListWidget,
+    QListWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -28,6 +29,104 @@ from PySide6.QtWidgets import (
 
 from ui.widgets.card import Card
 
+
+STATUS_LABELS = {
+    "READY": "準備中",
+    "IDLE": "待機中",
+    "ENTRY_WAIT": "エントリー待ち",
+    "ENTRY_FILLED": "エントリー約定",
+    "EXIT_WAIT": "決済待ち",
+    "FORCE_EXITING": "成行決済中",
+    "EXIT_FILLED": "決済完了",
+    "CANCELED": "キャンセル",
+    "ERROR": "エラー",
+}
+
+STATUS_VARIANTS = {
+    "READY": "neutral",
+    "IDLE": "neutral",
+    "ENTRY_WAIT": "info",
+    "ENTRY_FILLED": "info",
+    "EXIT_WAIT": "info",
+    "FORCE_EXITING": "warning",
+    "EXIT_FILLED": "success",
+    "CANCELED": "neutral",
+    "ERROR": "danger",
+}
+
+
+class StatusRowWidget(QFrame):
+    def __init__(
+        self,
+        index: str,
+        symbol: str,
+        side: str,
+        order_type: str,
+        schedule: str,
+        state_label: str,
+        state_variant: str,
+        final_label: str,
+        final_variant: str,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("statusItem")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
+
+        header_row = QHBoxLayout()
+        header_row.setSpacing(10)
+        title = QLabel(f"注文{index} · {symbol}")
+        title.setObjectName("statusTitle")
+        header_row.addWidget(title)
+        header_row.addStretch()
+        self.state_badge = self._make_badge(state_label, state_variant)
+        header_row.addWidget(self.state_badge)
+        layout.addLayout(header_row)
+
+        chips_row = QHBoxLayout()
+        chips_row.setSpacing(8)
+        chips_row.addWidget(self._make_chip(side))
+        chips_row.addWidget(self._make_chip(order_type))
+        chips_row.addWidget(self._make_chip(schedule))
+        chips_row.addStretch()
+        layout.addLayout(chips_row)
+
+        footer_row = QHBoxLayout()
+        footer_row.setSpacing(8)
+        footer_label = QLabel("最終結果")
+        footer_label.setObjectName("statusMeta")
+        footer_row.addWidget(footer_label)
+        self.final_badge = self._make_badge(final_label, final_variant)
+        footer_row.addWidget(self.final_badge)
+        footer_row.addStretch()
+        layout.addLayout(footer_row)
+
+    def _make_chip(self, text: str) -> QLabel:
+        chip = QLabel(text or "-")
+        chip.setObjectName("statusChip")
+        return chip
+
+    def _make_badge(self, text: str, variant: str) -> QLabel:
+        badge = QLabel(text or "-")
+        badge.setObjectName("statusBadge")
+        badge.setProperty("variant", variant)
+        badge.style().unpolish(badge)
+        badge.style().polish(badge)
+        return badge
+
+    def update_state(self, label: str, variant: str) -> None:
+        self.state_badge.setText(label)
+        self.state_badge.setProperty("variant", variant)
+        self.state_badge.style().unpolish(self.state_badge)
+        self.state_badge.style().polish(self.state_badge)
+
+    def update_final(self, label: str, variant: str) -> None:
+        self.final_badge.setText(label)
+        self.final_badge.setProperty("variant", variant)
+        self.final_badge.style().unpolish(self.final_badge)
+        self.final_badge.style().polish(self.final_badge)
 
 class OrdersPage(QWidget):
     start_requested = Signal()
@@ -194,16 +293,12 @@ class OrdersPage(QWidget):
         layout.addLayout(button_layout)
 
     def _build_status(self, layout: QVBoxLayout) -> None:
-        self.status_table = QTableWidget(0, 7)
-        self.status_table.setHorizontalHeaderLabels(
-            ["番号", "銘柄", "売買", "注文種別", "実行区分", "現在状態", "最終結果"]
-        )
-        self.status_table.verticalHeader().setVisible(False)
-        self.status_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.status_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self.status_table.setAlternatingRowColors(True)
-        self.status_table.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.status_table)
+        self.status_list = QListWidget()
+        self.status_list.setObjectName("statusList")
+        self.status_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        self.status_list.setSpacing(12)
+        layout.addWidget(self.status_list)
+        self.status_rows: list[StatusRowWidget] = []
 
     def _build_log(self, layout: QVBoxLayout) -> None:
         self.log_output = QPlainTextEdit()
@@ -212,26 +307,39 @@ class OrdersPage(QWidget):
         layout.addWidget(self.log_output)
         
     def reset_status_rows(self, rows: list[dict[str, str]]) -> None:
-        self.status_table.setRowCount(len(rows))
-        for row_index, data in enumerate(rows):
-            self.status_table.setItem(row_index, 0, QTableWidgetItem(data.get("index", "-")))
-            self.status_table.setItem(row_index, 1, QTableWidgetItem(data.get("symbol", "-")))
-            self.status_table.setItem(row_index, 2, QTableWidgetItem(data.get("side", "-")))
-            self.status_table.setItem(row_index, 3, QTableWidgetItem(data.get("order_type", "-")))
-            self.status_table.setItem(row_index, 4, QTableWidgetItem(data.get("schedule", "-")))
-            self.status_table.setItem(row_index, 5, QTableWidgetItem("準備中"))
-            self.status_table.setItem(row_index, 6, QTableWidgetItem("-"))
-        self.status_table.resizeColumnsToContents()
+        self.status_list.clear()
+        self.status_rows.clear()
+        for data in rows:
+            state_label, state_variant = self._localize_state("READY")
+            final_label, final_variant = self._localize_state("-")
+            widget = StatusRowWidget(
+                index=data.get("index", "-"),
+                symbol=data.get("symbol", "-"),
+                side=data.get("side", "-"),
+                order_type=data.get("order_type", "-"),
+                schedule=data.get("schedule", "-"),
+                state_label=state_label,
+                state_variant=state_variant,
+                final_label=final_label,
+                final_variant=final_variant,
+            )
+            item = QListWidgetItem()
+            item.setSizeHint(widget.sizeHint())
+            self.status_list.addItem(item)
+            self.status_list.setItemWidget(item, widget)
+            self.status_rows.append(widget)
 
     def update_status_row(self, row_index: int, state: str) -> None:
-        if row_index < 0 or row_index >= self.status_table.rowCount():
+        if row_index < 0 or row_index >= len(self.status_rows):
             return
-        self.status_table.setItem(row_index, 5, QTableWidgetItem(state))
+        label, variant = self._localize_state(state)
+        self.status_rows[row_index].update_state(label, variant)
 
     def update_final_row(self, row_index: int, state: str) -> None:
-        if row_index < 0 or row_index >= self.status_table.rowCount():
+        if row_index < 0 or row_index >= len(self.status_rows):
             return
-        self.status_table.setItem(row_index, 6, QTableWidgetItem(state))
+        label, variant = self._localize_state(state)
+        self.status_rows[row_index].update_final(label, variant)
         
     def _toggle_entry_price(self, entry_price_input: QDoubleSpinBox, value: str) -> None:
         is_limit = value == "指値"
@@ -241,6 +349,12 @@ class OrdersPage(QWidget):
         is_reserved = value == "予約"
         schedule_time_input.setVisible(is_reserved)
 
+    def _localize_state(self, state: str) -> tuple[str, str]:
+        key = state.upper() if state else "-"
+        label = STATUS_LABELS.get(key, state if state else "-")
+        variant = STATUS_VARIANTS.get(key, "neutral")
+        return label, variant
+    
     def _update_order_cards(self, count: int) -> None:
         self._clear_layout(self.input_cards_container)
         self.order_inputs.clear()

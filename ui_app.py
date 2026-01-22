@@ -255,6 +255,14 @@ class MainWindow(QMainWindow):
             scheduled_epoch = None
             if schedule_type == "予約":
                 scheduled_epoch = input_set["schedule_time_input"].dateTime().toSecsSinceEpoch()
+            side_label = input_set["side_input"].currentText()
+            side_code = input_set["side_input"].currentData()
+            cash_margin = input_set["cash_margin_input"].currentData()
+            margin_trade_type = (
+                input_set["margin_trade_type_input"].currentData()
+                if cash_margin == 2
+                else None
+            )                
             inputs.append(
                 DemoInputs(
                     symbol_code=input_set["symbol_input"].text().strip() or "N/A",
@@ -264,7 +272,10 @@ class MainWindow(QMainWindow):
                     loss_price=input_set["loss_price_input"].value(),
                     schedule_type=schedule_type,
                     scheduled_epoch=scheduled_epoch,
-                    side=input_set["side_input"].currentText(),
+                    side_label=side_label,
+                    side_code=side_code,
+                    cash_margin=cash_margin,
+                    margin_trade_type=margin_trade_type,
                     poll_interval_sec=input_set["poll_interval_input"].value(),
                     fills_after_polls=input_set["fills_after_input"].value(),
                     force_exit_poll_interval_sec=self.settings_page.force_poll_interval_input.value(),
@@ -286,7 +297,7 @@ class MainWindow(QMainWindow):
                 {
                     "index": str(index),
                     "symbol": inputs.symbol_code,
-                    "side": inputs.side,
+                    "side": inputs.side_label,
                     "order_type": "成行" if inputs.entry_order_type == "MARKET" else "指値",
                     "schedule": inputs.schedule_type,
                 }

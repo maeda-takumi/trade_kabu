@@ -26,7 +26,10 @@ class DemoInputs:
     loss_price: float
     schedule_type: str
     scheduled_epoch: Optional[float]
-    side: str
+    side_label: str
+    side_code: int
+    cash_margin: int
+    margin_trade_type: Optional[int]
     poll_interval_sec: float
     fills_after_polls: int
     force_exit_poll_interval_sec: float
@@ -78,13 +81,15 @@ class DemoWorker(QThread):
             order_type=self.inputs.entry_order_type,
             qty=1,
             symbol_code=self.inputs.symbol_code,
-            side=self.inputs.side,
+            side=self.inputs.side_code,
+            cash_margin=self.inputs.cash_margin,
+            margin_trade_type=self.inputs.margin_trade_type,
             price=entry_price,
         )
 
         self.log_message.emit(
             "[demo] setup: "
-            f"symbol={self.inputs.symbol_code}, side={self.inputs.side}, "
+            f"symbol={self.inputs.symbol_code}, side={self.inputs.side_label}, "
             f"order_type={self.inputs.entry_order_type}, entry_price={self.inputs.entry_price}, "
             f"profit={self.inputs.profit_price}, loss={self.inputs.loss_price}"
         )

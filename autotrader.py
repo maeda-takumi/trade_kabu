@@ -303,16 +303,22 @@ class KabuStationBroker(BrokerInterface):
     def _build_order_payload(self, order: Order) -> dict:
         password = self._require_trading_password()
         required_fields = {
-            "Symbol": order.symbol,
-            "Exchange": order.exchange,
-            "Side": order.side,
-            "CashMargin": order.cash_margin,
-            "Qty": order.qty,
-            "FrontOrderType": order.front_order_type,
+            "Symbol": (order.symbol, "銘柄コード(Symbol)"),
+            "Exchange": (order.exchange, "市場コード(Exchange)"),
+            "Side": (order.side, "売買区分(Side: 1=買い, 2=売り)"),
+            "CashMargin": (order.cash_margin, "現物/信用区分(CashMargin: 1=現物, 2=信用)"),
+            "Qty": (order.qty, "数量(Qty)"),
+            "FrontOrderType": (order.front_order_type, "執行条件(FrontOrderType)"),
         }
-        missing = [key for key, value in required_fields.items() if value is None]
+        missing = [label for _, (value, label) in required_fields.items() if value is None]
+        if order.cash_margin == 2 and order.margin_trade_type is None:
+            missing.append("信用区分(MarginTradeType: 1=信用新規, 2=信用返済)")
         if missing:
-            raise RuntimeError(f"注文に必要なフィールドが不足しています: {', '.join(missing)}")
+            details = " / ".join(missing)
+            raise RuntimeError(
+                f"注文送信に必要な項目が不足しています: {details}。"
+                "UI入力とAPI仕様(/kabusapi/sendorder)の対応を確認してください。"
+            )
         payload: dict[str, object] = {
             "Password": password,
             "Symbol": order.symbol,

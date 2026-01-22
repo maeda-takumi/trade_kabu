@@ -256,8 +256,20 @@ class OrdersPage(QWidget):
         form.addRow("銘柄コード", symbol_input)
 
         side_input = QComboBox()
-        side_input.addItems(["買入", "売入"])
+        side_input.addItem("買入", 1)
+        side_input.addItem("売入", 2)
         form.addRow("売買区分", side_input)
+
+        cash_margin_input = QComboBox()
+        cash_margin_input.addItem("現物", 1)
+        cash_margin_input.addItem("信用", 2)
+        form.addRow("現物/信用区分", cash_margin_input)
+
+        margin_trade_type_input = QComboBox()
+        margin_trade_type_input.addItem("信用新規", 1)
+        margin_trade_type_input.addItem("信用返済", 2)
+        form.addRow("信用新規/返済", margin_trade_type_input)
+        # TODO: kabuステーションAPI仕様で信用区分が不要な場合は削除する。
 
         order_type_input = QComboBox()
         order_type_input.addItems(["成行", "指値"])
@@ -296,10 +308,16 @@ class OrdersPage(QWidget):
         order_type_input.currentTextChanged.connect(
             lambda value, target=entry_price_input: self._toggle_entry_price(target, value)
         )
+        cash_margin_input.currentIndexChanged.connect(
+            lambda _, target=margin_trade_type_input, source=cash_margin_input: self._toggle_margin_trade_type(
+                target, source
+            )
+        )        
         schedule_type_input.currentTextChanged.connect(
             lambda value, target=schedule_time_input: self._toggle_schedule(target, value)
         )
         self._toggle_entry_price(entry_price_input, order_type_input.currentText())
+        self._toggle_margin_trade_type(margin_trade_type_input, cash_margin_input)        
         self._toggle_schedule(schedule_time_input, schedule_type_input.currentText())
 
         demo_controls = QGroupBox("デモ実行パラメータ")
@@ -322,6 +340,8 @@ class OrdersPage(QWidget):
         return {
             "symbol_input": symbol_input,
             "side_input": side_input,
+            "cash_margin_input": cash_margin_input,
+            "margin_trade_type_input": margin_trade_type_input,
             "order_type_input": order_type_input,
             "entry_price_input": entry_price_input,
             "profit_price_input": profit_price_input,
@@ -418,6 +438,12 @@ class OrdersPage(QWidget):
         is_reserved = value == "予約"
         schedule_time_input.setVisible(is_reserved)
 
+    def _toggle_margin_trade_type(
+        self, margin_trade_type_input: QComboBox, cash_margin_input: QComboBox
+    ) -> None:
+        is_margin = cash_margin_input.currentData() == 2
+        margin_trade_type_input.setVisible(is_margin)
+
     def _localize_state(self, state: str) -> tuple[str, str]:
         key = state.upper() if state else "-"
         label = STATUS_LABELS.get(key, state if state else "-")
@@ -452,6 +478,8 @@ class OrdersPage(QWidget):
             if index == 0:
                 self.symbol_input = inputs["symbol_input"]
                 self.side_input = inputs["side_input"]
+                self.cash_margin_input = inputs["cash_margin_input"]
+                self.margin_trade_type_input = inputs["margin_trade_type_input"]                
                 self.order_type_input = inputs["order_type_input"]
                 self.entry_price_input = inputs["entry_price_input"]
                 self.profit_price_input = inputs["profit_price_input"]

@@ -65,6 +65,7 @@ class AutoTraderConfig:
     force_exit_max_duration_sec: float = 600.0  # 強制決済が失敗扱いになるまでの最大時間
     force_exit_start_before_close_min: int = 30  # 大引け前に強制決済を開始する目安
     force_exit_deadline_before_close_min: int = 10  # 大引け前の強制決済デッドライン
+    reconcile_on_success: bool = True  # 約定成功時の再照合を実施するか
 
 
 @dataclass
@@ -77,6 +78,7 @@ class Order:
     price: Optional[float] = None
     order_id: Optional[str] = None
     status: OrderStatus = OrderStatus.NEW
+    filled_qty: float = 0.0
     created_at: float = field(default_factory=time.time)
 
     def place(self, broker: BrokerInterface, repository: Optional["OrderRepository"] = None) -> None:
@@ -90,6 +92,8 @@ class Order:
         """ブローカーから最新状態を取得して保持する。"""
         previous_status = self.status
         self.status = broker.poll_order(self)
+        if self.status == OrderStatus.FILLED:
+            self.filled_qty = self.qty
         if repository and self.status != previous_status:
             repository.update_status(self)
         return self.status
@@ -221,7 +225,13 @@ class AutoTrader:
         self._loss_price: Optional[float] = None
         self._force_exit_started_at: Optional[float] = None
         self._last_force_exit_poll: Optional[float] = None
+        self._confirmed_order_ids: set[str] = set()
 
+    def _enter_error_state(self) -> None:
+        """エラー状態へ遷移し、未約定注文を可能な限り取り消す。"""
+        self.state = AutoTraderState.ERROR
+        self.cancel_all_orders()
+        
     @staticmethod
     def calculate_qty(capital: float, entry_price: float) -> int:
         """軍資金とエントリー価格から注文数量を算出する（端数切り捨て）。"""
@@ -248,17 +258,40 @@ class AutoTrader:
         """注文ステータス変化に応じて状態遷移と後続処理を行う。"""
         if self.state == AutoTraderState.ERROR:
             return
+        if status in (OrderStatus.REJECTED, OrderStatus.ERROR):
+            self._enter_error_state()
+            return
         # エントリーが約定したら利確/損切り注文を作る
         if order.role == OrderRole.ENTRY and status == OrderStatus.FILLED:
             self.state = AutoTraderState.ENTRY_FILLED
             self.create_exit_orders()
         # 利確 or 損切りのいずれかが約定したら他方をキャンセル
         elif order.role in (OrderRole.EXIT_PROFIT, OrderRole.EXIT_LOSS) and status == OrderStatus.FILLED:
+            other_role = (
+                OrderRole.EXIT_LOSS if order.role == OrderRole.EXIT_PROFIT else OrderRole.EXIT_PROFIT
+            )
+            other_order = self.orders.get(other_role)
+            if other_order and other_order.status == OrderStatus.FILLED:
+                self._enter_error_state()
+                return
+            
             self.cancel_other_exit_orders(order)
-            self.state = AutoTraderState.EXIT_FILLED
+            if self.state != AutoTraderState.ERROR:
+                self.state = AutoTraderState.EXIT_FILLED
         # 成行強制決済が約定したら終了
         elif order.role == OrderRole.EXIT_MARKET and status == OrderStatus.FILLED:
             self.state = AutoTraderState.EXIT_FILLED
+
+    def _confirm_order_filled(self, order: Order) -> bool:
+        if not self.config.reconcile_on_success:
+            return True
+        if order.order_id is None or order.order_id in self._confirmed_order_ids:
+            return True
+        confirmed_status = order.poll_status(self.broker, repository=self.repository)
+        if confirmed_status == OrderStatus.FILLED:
+            self._confirmed_order_ids.add(order.order_id)
+            return True
+        return False
 
     def create_exit_orders(self) -> None:
         """利確/損切り注文を作成して送信する。"""
@@ -301,7 +334,11 @@ class AutoTrader:
         for role in (OrderRole.EXIT_PROFIT, OrderRole.EXIT_LOSS):
             order = self.orders.get(role)
             if order and order is not filled_order:
-                order.cancel(self.broker, repository=self.repository)
+                success = order.cancel(self.broker, repository=self.repository)
+                if not success:
+                    self.force_exit_market()
+                    if self.state != AutoTraderState.FORCE_EXITING:
+                        self._enter_error_state()
 
     def force_exit_market(self) -> None:
         """強制決済（成行）を実行する。"""
@@ -353,14 +390,40 @@ class AutoTrader:
             if order.status in (OrderStatus.FILLED, OrderStatus.CANCELED, OrderStatus.REJECTED, OrderStatus.ERROR):
                 continue
             status = order.poll_status(self.broker, repository=self.repository)
+            if status in (OrderStatus.REJECTED, OrderStatus.ERROR):
+                self._enter_error_state()
+                return
             # 強制決済時に一部約定なら成行を出し直す
-            if status == OrderStatus.PARTIAL and self.state == AutoTraderState.FORCE_EXITING:
-                replacement = Order(role=OrderRole.EXIT_MARKET, order_type="MARKET", qty=order.qty)
-                self.orders[replacement.role] = replacement
-                replacement.place(self.broker, repository=self.repository)
+            if status == OrderStatus.PARTIAL:
+                if self._handle_partial_fill(order):
+                    continue
             # 状態変化に応じた処理へ
             self.on_order_event(order, status)
 
+    def _handle_partial_fill(self, order: Order) -> bool:
+        """部分約定時に残量分の注文を再送する。処理した場合はTrue。"""
+        if order.filled_qty <= 0 or order.filled_qty >= order.qty:
+            return False
+        remaining_qty = order.qty - order.filled_qty
+        if remaining_qty <= 0:
+            return False
+        if self.state == AutoTraderState.FORCE_EXITING:
+            replacement = Order(role=OrderRole.EXIT_MARKET, order_type="MARKET", qty=remaining_qty)
+            self.orders[replacement.role] = replacement
+            replacement.place(self.broker, repository=self.repository)
+            return True
+        if not order.cancel(self.broker, repository=self.repository):
+            self._enter_error_state()
+            return True
+        replacement = Order(
+            role=order.role,
+            order_type=order.order_type,
+            qty=remaining_qty,
+            price=order.price,
+        )
+        self.orders[replacement.role] = replacement
+        replacement.place(self.broker, repository=self.repository)
+        return True
 
 def run_demo(
     poll_interval_sec: float = 0.5,

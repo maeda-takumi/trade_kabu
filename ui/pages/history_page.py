@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPlainTextEdit, QVBoxLayout, QWidget
 
 from ui.widgets.card import Card
 
@@ -16,8 +16,16 @@ class HistoryPage(QWidget):
         history_card = Card("注文履歴")
         layout.addWidget(history_card)
 
-        placeholder = QLabel("履歴は後続で実装予定")
-        placeholder.setObjectName("mutedLabel")
-        history_card.body.addWidget(placeholder)
+        helper = QLabel("ログは時系列で追記されます。")
+        helper.setObjectName("mutedLabel")
+        history_card.body.addWidget(helper)
+
+        self.log_view = QPlainTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setPlaceholderText("ログ出力がここに表示されます")
+        history_card.body.addWidget(self.log_view)
 
         layout.addStretch()
+
+    def append_log(self, message: str) -> None:
+        self.log_view.appendPlainText(message)

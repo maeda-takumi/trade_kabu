@@ -306,6 +306,7 @@ class MainWindow(QMainWindow):
                     row, profit, loss
                 )
             )
+            worker.log_message.connect(self.history_page.append_log)
             worker.start()
             self.workers.append(worker)
 

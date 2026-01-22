@@ -42,6 +42,39 @@ class OrderStatus(Enum):
     REJECTED = auto()  # 拒否
     ERROR = auto()  # エラー
 
+class FrontOrderType(Enum):
+    """kabuステーションAPIのFrontOrderTypeコード。"""
+
+    MARKET = 10  # 成行
+    MARKET_ON_OPEN = 11  # 寄成
+    MARKET_ON_CLOSE = 12  # 引成
+    MARKET_NO_EXECUTION = 13  # 不成
+    IOC_MARKET = 14  # IOC成行
+    LIMIT = 20  # 指値
+    LIMIT_ON_OPEN = 21  # 寄指
+    LIMIT_ON_CLOSE = 22  # 引指
+    LIMIT_NO_EXECUTION = 23  # 不指
+    IOC_LIMIT = 24  # IOC指値
+    STOP = 30  # 逆指値
+    STOP_MARKET = 31  # 逆指値(成行)
+    STOP_LIMIT = 32  # 逆指値(指値)
+
+
+class ReverseLimitUnderOver(Enum):
+    """逆指値の判定方向。"""
+
+    OVER = 1  # 指定価格以上で発動
+    UNDER = 2  # 指定価格以下で発動
+
+
+ORDER_TYPE_TO_FRONT_ORDER_TYPE: Dict[str, FrontOrderType] = {
+    "MARKET": FrontOrderType.MARKET,
+    "LIMIT": FrontOrderType.LIMIT,
+    "STOP": FrontOrderType.STOP,
+    "STOP_MARKET": FrontOrderType.STOP_MARKET,
+    "STOP_LIMIT": FrontOrderType.STOP_LIMIT,
+}
+
 
 class BrokerInterface:
     """ブローカー（取引所APIなど）に依存する処理の抽象インターフェース。"""
@@ -95,6 +128,11 @@ class Order:
     symbol_code: Optional[str] = None
     time_in_force: Optional[str] = None
     price: Optional[float] = None
+    close_position_id: Optional[str] = None
+    stop_trigger_price: Optional[float] = None
+    stop_after_hit_order_type: Optional[int] = None
+    stop_after_hit_price: Optional[float] = None
+    stop_under_over: Optional[int] = None
     order_id: Optional[str] = None
     status: OrderStatus = OrderStatus.NEW
     filled_qty: float = 0.0
@@ -302,6 +340,10 @@ class KabuStationBroker(BrokerInterface):
 
     def _build_order_payload(self, order: Order) -> dict:
         password = self._require_trading_password()
+        if order.front_order_type is None:
+            mapped = ORDER_TYPE_TO_FRONT_ORDER_TYPE.get(order.order_type.upper())
+            if mapped:
+                order.front_order_type = mapped.value        
         required_fields = {
             "Symbol": (order.symbol, "銘柄コード(Symbol)"),
             "Exchange": (order.exchange, "市場コード(Exchange)"),
@@ -340,6 +382,19 @@ class KabuStationBroker(BrokerInterface):
         for key, value in optional_fields.items():
             if value is not None:
                 payload[key] = value
+        if order.close_position_id:
+            payload["ClosePositions"] = [{"HoldID": order.close_position_id, "Qty": order.qty}]
+        if order.stop_trigger_price is not None:
+            if order.stop_under_over is None or order.stop_after_hit_order_type is None:
+                raise RuntimeError("逆指値条件に必要な項目が不足しています。")
+            reverse_limit = {
+                "TriggerPrice": order.stop_trigger_price,
+                "UnderOver": order.stop_under_over,
+                "AfterHitOrderType": order.stop_after_hit_order_type,
+            }
+            if order.stop_after_hit_price is not None:
+                reverse_limit["AfterHitPrice"] = order.stop_after_hit_price
+            payload["ReverseLimitOrder"] = reverse_limit                
         return payload
 
     @staticmethod
@@ -412,7 +467,12 @@ class OrderRepository:
                     deliv_type INTEGER,
                     expire_day INTEGER,
                     front_order_type INTEGER,
+                    close_position_id TEXT,
                     price REAL,
+                    stop_trigger_price REAL,
+                    stop_after_hit_order_type INTEGER,
+                    stop_after_hit_price REAL,
+                    stop_under_over INTEGER,                    
                     filled_qty REAL,
                     status TEXT NOT NULL,
                     created_at REAL NOT NULL
@@ -431,7 +491,12 @@ class OrderRepository:
                     "account_type": "INTEGER",
                     "deliv_type": "INTEGER",
                     "expire_day": "INTEGER",
+                    "close_position_id": "TEXT",
                     "front_order_type": "INTEGER",
+                    "stop_trigger_price": "REAL",
+                    "stop_after_hit_order_type": "INTEGER",
+                    "stop_after_hit_price": "REAL",
+                    "stop_under_over": "INTEGER",
                 },
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)")
@@ -471,8 +536,10 @@ class OrderRepository:
                 INSERT OR IGNORE INTO orders (
                     order_id, role, order_type, qty, symbol, exchange, side, security_type,
                     cash_margin, margin_trade_type, account_type, deliv_type, expire_day,
-                    front_order_type, symbol_code, time_in_force, price, filled_qty, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    front_order_type, symbol_code, time_in_force, price, stop_trigger_price,
+                    stop_after_hit_order_type, stop_after_hit_price, stop_under_over, filled_qty,
+                    status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order.order_id,
@@ -491,7 +558,12 @@ class OrderRepository:
                     order.front_order_type,                    
                     order.symbol_code,
                     order.time_in_force,
+                    order.close_position_id,
                     order.price,
+                    order.stop_trigger_price,
+                    order.stop_after_hit_order_type,
+                    order.stop_after_hit_price,
+                    order.stop_under_over,
                     order.filled_qty,
                     order.status.name,
                     order.created_at,
@@ -555,6 +627,10 @@ class AutoTrader:
         self._profit_price = profit_price
         self._loss_price = loss_price
         # 新規エントリー注文を送信
+        if entry_order.front_order_type is None:
+            mapped = ORDER_TYPE_TO_FRONT_ORDER_TYPE.get(entry_order.order_type.upper())
+            if mapped:
+                entry_order.front_order_type = mapped.value
         self.entry_order = entry_order
         self.orders[entry_order.role] = entry_order
         entry_order.place(self.broker, repository=self.repository)
@@ -612,26 +688,17 @@ class AutoTrader:
         if exit_side is None and not isinstance(self.broker, DemoBroker):
             self.state = AutoTraderState.ERROR
             return
-        base_kwargs = {
-            "symbol": self.entry_order.symbol,
-            "exchange": self.entry_order.exchange,
-            "side": exit_side,
-            "security_type": self.entry_order.security_type,
-            "cash_margin": self.entry_order.cash_margin,
-            "margin_trade_type": self.entry_order.margin_trade_type,
-            "account_type": self.entry_order.account_type,
-            "deliv_type": self.entry_order.deliv_type,
-            "expire_day": self.entry_order.expire_day,
-            "front_order_type": self.entry_order.front_order_type,
-            "symbol_code": self.entry_order.symbol_code,
-            "time_in_force": self.entry_order.time_in_force,
-        }
-        # TODO: exit注文のFrontOrderTypeはAPI仕様に従って明示的に設定する。        
+        base_kwargs = self._build_exit_order_base(exit_side)
+        stop_under_over = self._resolve_stop_under_over()
+        if stop_under_over is None and not isinstance(self.broker, DemoBroker):
+            self.state = AutoTraderState.ERROR
+            return        
         # エントリー数量に合わせて両建ての出口注文を作る
         self.exit_profit_order = Order(
             role=OrderRole.EXIT_PROFIT,
             order_type="LIMIT",
             qty=self.entry_order.qty,
+            front_order_type=FrontOrderType.LIMIT.value,
             price=self._profit_price,
             **base_kwargs,
         )
@@ -640,7 +707,10 @@ class AutoTrader:
             role=OrderRole.EXIT_LOSS,
             order_type="STOP",
             qty=self.entry_order.qty,
-            price=self._loss_price,
+            front_order_type=FrontOrderType.STOP.value,
+            stop_trigger_price=self._loss_price,
+            stop_under_over=stop_under_over,
+            stop_after_hit_order_type=FrontOrderType.MARKET.value,
             **base_kwargs,
         )
         print(
@@ -676,10 +746,18 @@ class AutoTrader:
         if self.state in (AutoTraderState.EXIT_FILLED, AutoTraderState.ERROR):
             # すでに終わっているかエラーなら何もしない
             return
+        exit_side = self._resolve_exit_side()
+        if exit_side is None and not isinstance(self.broker, DemoBroker):
+            self.state = AutoTraderState.ERROR
+            return
+        base_kwargs = self._build_exit_order_base(exit_side)
         exit_order = Order(
             role=OrderRole.EXIT_MARKET,
             order_type="MARKET",
             qty=self.entry_order.qty if self.entry_order else 0,
+            close_position_id=self.entry_order.close_position_id if self.entry_order else None,
+            front_order_type=FrontOrderType.MARKET.value,
+            **base_kwargs,
         )
         self.orders[exit_order.role] = exit_order
         exit_order.place(self.broker, repository=self.repository)
@@ -735,7 +813,28 @@ class AutoTrader:
         if remaining_qty <= 0:
             return False
         if self.state == AutoTraderState.FORCE_EXITING:
-            replacement = Order(role=OrderRole.EXIT_MARKET, order_type="MARKET", qty=remaining_qty)
+            replacement = Order(
+                role=OrderRole.EXIT_MARKET,
+                order_type="MARKET",
+                qty=remaining_qty,
+                symbol=order.symbol,
+                exchange=order.exchange,
+                side=order.side,
+                security_type=order.security_type,
+                cash_margin=order.cash_margin,
+                margin_trade_type=order.margin_trade_type,
+                account_type=order.account_type,
+                deliv_type=order.deliv_type,
+                expire_day=order.expire_day,
+                front_order_type=order.front_order_type,
+                symbol_code=order.symbol_code,
+                time_in_force=order.time_in_force,
+                price=order.price,
+                stop_trigger_price=order.stop_trigger_price,
+                stop_after_hit_order_type=order.stop_after_hit_order_type,
+                stop_after_hit_price=order.stop_after_hit_price,
+                stop_under_over=order.stop_under_over,
+            )
             self.orders[replacement.role] = replacement
             replacement.place(self.broker, repository=self.repository)
             return True
@@ -759,6 +858,10 @@ class AutoTrader:
             front_order_type=order.front_order_type,
             symbol_code=order.symbol_code,
             time_in_force=order.time_in_force,
+            stop_trigger_price=order.stop_trigger_price,
+            stop_after_hit_order_type=order.stop_after_hit_order_type,
+            stop_after_hit_price=order.stop_after_hit_price,
+            stop_under_over=order.stop_under_over,
         )
         self.orders[replacement.role] = replacement
         replacement.place(self.broker, repository=self.repository)
@@ -774,7 +877,32 @@ class AutoTrader:
         if self.entry_order.side == 2:
             return 1
         return None
+    def _resolve_stop_under_over(self) -> Optional[int]:
+        if not self.entry_order:
+            return None
+        if self.entry_order.side == 1:
+            return ReverseLimitUnderOver.UNDER.value
+        if self.entry_order.side == 2:
+            return ReverseLimitUnderOver.OVER.value
+        return None
 
+    def _build_exit_order_base(self, exit_side: Optional[int]) -> dict:
+        if not self.entry_order:
+            return {}
+        return {
+            "symbol": self.entry_order.symbol,
+            "exchange": self.entry_order.exchange,
+            "side": exit_side,
+            "security_type": self.entry_order.security_type,
+            "cash_margin": self.entry_order.cash_margin,
+            "margin_trade_type": self.entry_order.margin_trade_type,
+            "account_type": self.entry_order.account_type,
+            "deliv_type": self.entry_order.deliv_type,
+            "expire_day": self.entry_order.expire_day,
+            "symbol_code": self.entry_order.symbol_code,
+            "time_in_force": self.entry_order.time_in_force,
+            "close_position_id": self.entry_order.close_position_id,
+        }
 def run_demo(
     poll_interval_sec: float = 0.5,
     fills_after_polls: int = 2,

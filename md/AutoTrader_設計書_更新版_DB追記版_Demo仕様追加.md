@@ -118,6 +118,11 @@ ERROR
 - role
 - order_type（LIMIT / MARKET）
 - price（指値時のみ）
+- front_order_type（kabuステーションAPIのFrontOrderTypeコード）
+- stop_trigger_price（逆指値のトリガー価格）
+- stop_after_hit_order_type（逆指値発動後の注文種別コード）
+- stop_after_hit_price（逆指値発動後の指値価格）
+- stop_under_over（逆指値の判定方向）
 - qty
 - order_id
 - status
@@ -138,6 +143,21 @@ ERROR
 
 - report_event()  
   状態変化を AutoTrader に通知する
+
+---
+
+### 7.6 FrontOrderType と注文種別の対応（kabuステーションAPI）
+
+| 注文種別 | FrontOrderType | 補足 |
+| --- | --- | --- |
+| 成行 | 10 | MARKET |
+| 指値 | 20 | LIMIT |
+| 逆指値 | 30 | 逆指値（ReverseLimitOrder を併用） |
+| 逆指値（成行） | 31 | 逆指値発動後に成行 |
+| 逆指値（指値） | 32 | 逆指値発動後に指値 |
+
+逆指値（STOP）を使う場合は ReverseLimitOrder の `TriggerPrice` / `UnderOver` / `AfterHitOrderType` を合わせて指定する。  
+発動後が指値の場合は `AfterHitPrice` も設定する。
 
 ---
 

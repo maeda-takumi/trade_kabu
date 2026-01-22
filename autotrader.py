@@ -112,6 +112,11 @@ class DemoBroker(BrokerInterface):
         self._poll_counts: Dict[str, int] = {}
         self._next_id = 1
 
+    def _required_polls(self, order: Order) -> int:
+        if order.role == OrderRole.EXIT_PROFIT:
+            return self.fills_after_polls + 1
+        return self.fills_after_polls
+    
     def place_order(self, order: Order) -> str:
         """注文IDを発行し、ポーリング回数を初期化する。"""
         order_id = f"DEMO-{self._next_id}"
@@ -124,7 +129,7 @@ class DemoBroker(BrokerInterface):
         if order.order_id is None:
             return OrderStatus.ERROR
         self._poll_counts[order.order_id] += 1
-        if self._poll_counts[order.order_id] > self.fills_after_polls:
+        if self._poll_counts[order.order_id] > self._required_polls(order):
             return OrderStatus.FILLED
         return OrderStatus.SENT
 

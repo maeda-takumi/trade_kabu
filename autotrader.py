@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
+import json
 from pathlib import Path
 import sqlite3
 import time
 from typing import Dict, Optional
-
+from urllib import error as url_error
+from urllib import request as url_request
 
 class AutoTraderState(Enum):
     """状態機械の現在地を表すステータス。"""
@@ -48,7 +50,7 @@ class BrokerInterface:
         """注文送信。注文IDを返す。"""
         raise NotImplementedError
 
-    def poll_order(self, order: "Order") -> OrderStatus:
+    def poll_order(self, order: "Order") -> "OrderPollResult":
         """注文状態のポーリング。"""
         raise NotImplementedError
 
@@ -68,6 +70,11 @@ class AutoTraderConfig:
     reconcile_on_success: bool = True  # 約定成功時の再照合を実施するか
 
 
+@dataclass(frozen=True)
+class OrderPollResult:
+    status: OrderStatus
+    filled_qty: float = 0.0
+
 @dataclass
 class Order:
     """注文の内容を保持し、送信/状態確認/キャンセルを行う薄いラッパー。"""
@@ -75,6 +82,19 @@ class Order:
     role: OrderRole
     order_type: str
     qty: float
+    symbol: Optional[str] = None
+    exchange: Optional[int] = None
+    side: Optional[int] = None
+    security_type: Optional[int] = None
+    cash_margin: Optional[int] = None
+    margin_trade_type: Optional[int] = None
+    account_type: Optional[int] = None
+    deliv_type: Optional[int] = None
+    expire_day: Optional[int] = None
+    front_order_type: Optional[int] = None
+    symbol_code: Optional[str] = None
+    side: Optional[str] = None
+    time_in_force: Optional[str] = None
     price: Optional[float] = None
     order_id: Optional[str] = None
     status: OrderStatus = OrderStatus.NEW
@@ -91,8 +111,11 @@ class Order:
     def poll_status(self, broker: BrokerInterface, repository: Optional["OrderRepository"] = None) -> OrderStatus:
         """ブローカーから最新状態を取得して保持する。"""
         previous_status = self.status
-        self.status = broker.poll_order(self)
-        if self.status == OrderStatus.FILLED:
+        poll_result = broker.poll_order(self)
+        self.status = poll_result.status
+        if poll_result.filled_qty:
+            self.filled_qty = poll_result.filled_qty
+        if self.status == OrderStatus.FILLED and not self.filled_qty:
             self.filled_qty = self.qty
         if repository and self.status != previous_status:
             repository.update_status(self)
@@ -128,19 +151,115 @@ class DemoBroker(BrokerInterface):
         self._poll_counts[order_id] = 0
         return order_id
 
-    def poll_order(self, order: Order) -> OrderStatus:
+    def poll_order(self, order: Order) -> OrderPollResult:
         """指定回数まではSENT、それ以降はFILLEDを返す。"""
         if order.order_id is None:
-            return OrderStatus.ERROR
+            return OrderPollResult(status=OrderStatus.ERROR)
         self._poll_counts[order.order_id] += 1
         if self._poll_counts[order.order_id] > self._required_polls(order):
-            return OrderStatus.FILLED
-        return OrderStatus.SENT
+            return OrderPollResult(status=OrderStatus.FILLED, filled_qty=order.qty)
+        return OrderPollResult(status=OrderStatus.SENT)
 
     def cancel_order(self, order: Order) -> bool:
         """常にキャンセル成功を返す簡易実装。"""
         return True
 
+@dataclass
+class KabuStationConfig:
+    base_url: str
+    api_token: str
+    trading_password: str
+    timeout_sec: float = 10.0
+
+
+
+class KabuStationBroker(BrokerInterface):
+    """kabuステーションAPI用ブローカー実装。"""
+
+    def __init__(
+        self,
+        base_url: str,
+        api_password: str,
+        api_token: Optional[str] = None,
+        timeout_sec: float = 10.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.api_password = api_password
+        self.api_token = api_token
+        self.timeout_sec = timeout_sec
+
+    def fetch_token(self) -> str:
+        """APIトークンを取得して保持する。
+
+        仕様:
+        - POST /kabusapi/token
+        - Header: Content-Type: application/json
+        - Body: {"APIPassword": "<APIパスワード>"}
+        """
+        response = self._request_json(
+            "POST",
+            "/kabusapi/token",
+            {"APIPassword": self.api_password},
+            require_token=False,
+        )
+        token = response.get("Token") or response.get("token")
+        if not token:
+            raise RuntimeError("トークン取得レスポンスに Token が含まれていません。")
+        self.api_token = token
+        return token
+
+    def request_json(
+        self, method: str, path: str, payload: Optional[dict] = None
+    ) -> dict:
+        """APIリクエストを送り、トークン失効時は再取得して再試行する。"""
+        if not self.api_token:
+            self.fetch_token()
+        try:
+            return self._request_json(method, path, payload, require_token=True)
+        except url_error.HTTPError as exc:
+            if exc.code == 401:
+                self.fetch_token()
+                return self._request_json(method, path, payload, require_token=True)
+            raise
+
+    def place_order(self, order: "Order") -> str:
+        raise NotImplementedError("実運用向けの注文APIは未実装です。")
+
+    def poll_order(self, order: "Order") -> OrderStatus:
+        raise NotImplementedError("実運用向けの注文APIは未実装です。")
+
+    def cancel_order(self, order: "Order") -> bool:
+        raise NotImplementedError("実運用向けの注文APIは未実装です。")
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        payload: Optional[dict],
+        require_token: bool,
+    ) -> dict:
+        url = self._build_url(path)
+        headers = {"Content-Type": "application/json"}
+        if require_token and self.api_token:
+            headers["X-API-KEY"] = self.api_token
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        request_obj = url_request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with url_request.urlopen(request_obj, timeout=self.timeout_sec) as response:
+                body = response.read().decode("utf-8")
+        except url_error.HTTPError:
+            raise
+        except url_error.URLError as exc:
+            raise RuntimeError("kabuステーションAPIへ接続できません。") from exc
+        if not body:
+            return {}
+        return json.loads(body)
+
+    def _build_url(self, path: str) -> str:
+        if not path.startswith("/"):
+            path = f"/{path}"
+        return f"{self.base_url}{path}"
+    
 class OrderRepository:
     """注文情報をSQLiteに保存するリポジトリ。"""
 
@@ -161,15 +280,52 @@ class OrderRepository:
                     role TEXT NOT NULL,
                     order_type TEXT NOT NULL,
                     qty REAL NOT NULL,
+                    symbol TEXT,
+                    exchange INTEGER,
+                    side INTEGER,
+                    security_type INTEGER,
+                    cash_margin INTEGER,
+                    margin_trade_type INTEGER,
+                    account_type INTEGER,
+                    deliv_type INTEGER,
+                    expire_day INTEGER,
+                    front_order_type INTEGER,
                     price REAL,
                     status TEXT NOT NULL,
                     created_at REAL NOT NULL
                 )
                 """
             )
+            self._ensure_columns(
+                conn,
+                {
+                    "symbol": "TEXT",
+                    "exchange": "INTEGER",
+                    "side": "INTEGER",
+                    "security_type": "INTEGER",
+                    "cash_margin": "INTEGER",
+                    "margin_trade_type": "INTEGER",
+                    "account_type": "INTEGER",
+                    "deliv_type": "INTEGER",
+                    "expire_day": "INTEGER",
+                    "front_order_type": "INTEGER",
+                },
+            )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_role ON orders(role)")
+            self._ensure_column(conn, "orders", "symbol_code", "TEXT")
+            self._ensure_column(conn, "orders", "side", "TEXT")
+            self._ensure_column(conn, "orders", "time_in_force", "TEXT")
+
+    @staticmethod
+    def _ensure_columns(self, conn: sqlite3.Connection, columns: Dict[str, str]) -> None:
+        existing_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(orders)")
+        }
+        for name, column_type in columns.items():
+            if name not in existing_columns:
+                conn.execute(f"ALTER TABLE orders ADD COLUMN {name} {column_type}")
 
     def insert_order(self, order: "Order") -> None:
         if order.order_id is None:
@@ -178,14 +334,29 @@ class OrderRepository:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO orders (
-                    order_id, role, order_type, qty, price, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    order_id, role, order_type, qty, symbol, exchange, side, security_type,
+                    cash_margin, margin_trade_type, account_type, deliv_type, expire_day,
+                    front_order_type, price, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order.order_id,
                     order.role.name,
                     order.order_type,
                     order.qty,
+                    order.symbol,
+                    order.exchange,
+                    order.side,
+                    order.security_type,
+                    order.cash_margin,
+                    order.margin_trade_type,
+                    order.account_type,
+                    order.deliv_type,
+                    order.expire_day,
+                    order.front_order_type,                    
+                    order.symbol_code,
+                    order.side,
+                    order.time_in_force,
                     order.price,
                     order.status.name,
                     order.created_at,

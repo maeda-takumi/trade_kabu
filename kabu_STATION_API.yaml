@@ -1,0 +1,42 @@
+openapi: 3.0.0
+info:
+  title: kabuステーションAPI (抜粋)
+  version: "1.0"
+paths:
+  /kabusapi/cancelorder:
+    put:
+      summary: 注文キャンセル
+      description: 受付番号で注文をキャンセルする。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - OrderId
+                - Password
+              properties:
+                OrderId:
+                  type: string
+                  description: 受付番号
+                Password:
+                  type: string
+                  description: 取引パスワード
+                FrontOrderId:
+                  type: string
+                  description: 注文ID（任意）
+      responses:
+        "200":
+          description: キャンセル結果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Result:
+                    type: integer
+                    description: 0 なら成功
+                  OrderId:
+                    type: string
+                    description: 受付番号

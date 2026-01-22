@@ -69,10 +69,7 @@ class DemoWorker(QThread):
             force_exit_deadline_before_close_min=self.inputs.force_exit_deadline_before_close_min,
         )
         broker = DemoBroker(fills_after_polls=self.inputs.fills_after_polls)
-        trader = AutoTrader(broker, config=config)
-        entry_price = (
-            self.inputs.entry_price if self.inputs.entry_order_type == "LIMIT" else None
-        )        
+        trader = AutoTrader(broker, config=config)      
         entry_price = (
             self.inputs.entry_price if self.inputs.entry_order_type == "LIMIT" else None
         )
@@ -80,6 +77,8 @@ class DemoWorker(QThread):
             role=OrderRole.ENTRY,
             order_type=self.inputs.entry_order_type,
             qty=1,
+            symbol_code=self.inputs.symbol_code,
+            side=self.inputs.side,
             price=entry_price,
         )
 

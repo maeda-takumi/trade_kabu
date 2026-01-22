@@ -93,7 +93,6 @@ class Order:
     expire_day: Optional[int] = None
     front_order_type: Optional[int] = None
     symbol_code: Optional[str] = None
-    side: Optional[str] = None
     time_in_force: Optional[str] = None
     price: Optional[float] = None
     order_id: Optional[str] = None
@@ -180,11 +179,13 @@ class KabuStationBroker(BrokerInterface):
         self,
         base_url: str,
         api_password: str,
+        trading_password: Optional[str] = None,
         api_token: Optional[str] = None,
         timeout_sec: float = 10.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_password = api_password
+        self.trading_password = trading_password
         self.api_token = api_token
         self.timeout_sec = timeout_sec
 
@@ -223,14 +224,32 @@ class KabuStationBroker(BrokerInterface):
             raise
 
     def place_order(self, order: "Order") -> str:
-        raise NotImplementedError("実運用向けの注文APIは未実装です。")
+        payload = self._build_order_payload(order)
+        response = self.request_json("POST", "/kabusapi/sendorder", payload)
+        order_id = response.get("OrderId") or response.get("orderId")
+        if not order_id:
+            raise RuntimeError("注文レスポンスに OrderId が含まれていません。")
+        return str(order_id)
 
-    def poll_order(self, order: "Order") -> OrderStatus:
-        raise NotImplementedError("実運用向けの注文APIは未実装です。")
-
+    def poll_order(self, order: "Order") -> OrderPollResult:
+        if order.order_id is None:
+            return OrderPollResult(status=OrderStatus.ERROR)
+        response = self.request_json("GET", f"/kabusapi/orders?orderid={order.order_id}")
+        order_payload = self._find_order_payload(order.order_id, response)
+        status = self._map_order_status(order_payload)
+        filled_qty = self._extract_filled_qty(order_payload)
+        return OrderPollResult(status=status, filled_qty=filled_qty)
+    
     def cancel_order(self, order: "Order") -> bool:
-        raise NotImplementedError("実運用向けの注文APIは未実装です。")
-
+        if order.order_id is None:
+            return False
+        payload = {
+            "OrderId": order.order_id,
+            "Password": self._require_trading_password(),
+        }
+        response = self.request_json("PUT", "/kabusapi/cancelorder", payload)
+        return int(response.get("Result", 1)) == 0
+    
     def _request_json(
         self,
         method: str,
@@ -259,7 +278,87 @@ class KabuStationBroker(BrokerInterface):
         if not path.startswith("/"):
             path = f"/{path}"
         return f"{self.base_url}{path}"
-    
+
+    def _require_trading_password(self) -> str:
+        if not self.trading_password:
+            raise RuntimeError("取引パスワードが設定されていません。")
+        return self.trading_password
+
+    def _build_order_payload(self, order: Order) -> dict:
+        password = self._require_trading_password()
+        required_fields = {
+            "Symbol": order.symbol,
+            "Exchange": order.exchange,
+            "Side": order.side,
+            "CashMargin": order.cash_margin,
+            "Qty": order.qty,
+            "FrontOrderType": order.front_order_type,
+        }
+        missing = [key for key, value in required_fields.items() if value is None]
+        if missing:
+            raise RuntimeError(f"注文に必要なフィールドが不足しています: {', '.join(missing)}")
+        payload: dict[str, object] = {
+            "Password": password,
+            "Symbol": order.symbol,
+            "Exchange": order.exchange,
+            "Side": order.side,
+            "CashMargin": order.cash_margin,
+            "Qty": order.qty,
+            "FrontOrderType": order.front_order_type,
+        }
+        optional_fields = {
+            "SecurityType": order.security_type,
+            "MarginTradeType": order.margin_trade_type,
+            "AccountType": order.account_type,
+            "DelivType": order.deliv_type,
+            "ExpireDay": order.expire_day,
+            "Price": order.price,
+            "TimeInForce": order.time_in_force,
+        }
+        for key, value in optional_fields.items():
+            if value is not None:
+                payload[key] = value
+        return payload
+
+    @staticmethod
+    def _find_order_payload(order_id: str, response: dict) -> dict:
+        if not response:
+            return {}
+        if isinstance(response, list):
+            for item in response:
+                if str(item.get("OrderId")) == str(order_id):
+                    return item
+            return {}
+        if isinstance(response, dict) and "Details" in response:
+            for item in response.get("Details", []):
+                if str(item.get("OrderId")) == str(order_id):
+                    return item
+        return response if isinstance(response, dict) else {}
+
+    @staticmethod
+    def _map_order_status(payload: dict) -> OrderStatus:
+        state = str(payload.get("State") or payload.get("OrderState") or "").lower()
+        if any(key in state for key in ("done", "filled", "約定", "complete")):
+            return OrderStatus.FILLED
+        if any(key in state for key in ("canceled", "cancel", "expired", "失効")):
+            return OrderStatus.CANCELED
+        if any(key in state for key in ("rejected", "reject", "却下")):
+            return OrderStatus.REJECTED
+        if any(key in state for key in ("partial", "一部")):
+            return OrderStatus.PARTIAL
+        if state:
+            return OrderStatus.SENT
+        return OrderStatus.ERROR
+
+    @staticmethod
+    def _extract_filled_qty(payload: dict) -> float:
+        for key in ("CumQty", "FilledQty", "ExecuteQty", "Filled"):
+            if key in payload and payload[key] is not None:
+                try:
+                    return float(payload[key])
+                except (TypeError, ValueError):
+                    continue
+        return 0.0    
 class OrderRepository:
     """注文情報をSQLiteに保存するリポジトリ。"""
 
@@ -315,10 +414,8 @@ class OrderRepository:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_role ON orders(role)")
             self._ensure_column(conn, "orders", "symbol_code", "TEXT")
-            self._ensure_column(conn, "orders", "side", "TEXT")
             self._ensure_column(conn, "orders", "time_in_force", "TEXT")
 
-    @staticmethod
     def _ensure_columns(self, conn: sqlite3.Connection, columns: Dict[str, str]) -> None:
         existing_columns = {
             row[1] for row in conn.execute("PRAGMA table_info(orders)")
@@ -326,6 +423,19 @@ class OrderRepository:
         for name, column_type in columns.items():
             if name not in existing_columns:
                 conn.execute(f"ALTER TABLE orders ADD COLUMN {name} {column_type}")
+    def _ensure_column(
+        self,
+        conn: sqlite3.Connection,
+        table: str,
+        name: str,
+        column_type: str,
+    ) -> None:
+        existing_columns = {
+            row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+        }
+        if name not in existing_columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
+
 
     def insert_order(self, order: "Order") -> None:
         if order.order_id is None:
@@ -336,8 +446,8 @@ class OrderRepository:
                 INSERT OR IGNORE INTO orders (
                     order_id, role, order_type, qty, symbol, exchange, side, security_type,
                     cash_margin, margin_trade_type, account_type, deliv_type, expire_day,
-                    front_order_type, price, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    front_order_type, symbol_code, time_in_force, price, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order.order_id,
@@ -355,7 +465,6 @@ class OrderRepository:
                     order.expire_day,
                     order.front_order_type,                    
                     order.symbol_code,
-                    order.side,
                     order.time_in_force,
                     order.price,
                     order.status.name,

@@ -98,6 +98,7 @@ class Order:
     order_id: Optional[str] = None
     status: OrderStatus = OrderStatus.NEW
     filled_qty: float = 0.0
+    last_error: Optional[str] = None
     created_at: float = field(default_factory=time.time)
 
     def place(self, broker: BrokerInterface, repository: Optional["OrderRepository"] = None) -> None:
@@ -110,13 +111,14 @@ class Order:
     def poll_status(self, broker: BrokerInterface, repository: Optional["OrderRepository"] = None) -> OrderStatus:
         """ブローカーから最新状態を取得して保持する。"""
         previous_status = self.status
+        previous_filled_qty = self.filled_qty
         poll_result = broker.poll_order(self)
         self.status = poll_result.status
         if poll_result.filled_qty:
             self.filled_qty = poll_result.filled_qty
         if self.status == OrderStatus.FILLED and not self.filled_qty:
             self.filled_qty = self.qty
-        if repository and self.status != previous_status:
+        if repository and (self.status != previous_status or self.filled_qty != previous_filled_qty):
             repository.update_status(self)
         return self.status
 
@@ -226,6 +228,10 @@ class KabuStationBroker(BrokerInterface):
     def place_order(self, order: "Order") -> str:
         payload = self._build_order_payload(order)
         response = self.request_json("POST", "/kabusapi/sendorder", payload)
+        result = response.get("Result")
+        if result is not None and int(result) != 0:
+            message = response.get("Msg") or response.get("Message") or "注文送信に失敗しました。"
+            raise RuntimeError(f"kabuステーションAPI注文エラー(Result={result}): {message}")
         order_id = response.get("OrderId") or response.get("orderId")
         if not order_id:
             raise RuntimeError("注文レスポンスに OrderId が含まれていません。")
@@ -235,6 +241,11 @@ class KabuStationBroker(BrokerInterface):
         if order.order_id is None:
             return OrderPollResult(status=OrderStatus.ERROR)
         response = self.request_json("GET", f"/kabusapi/orders?orderid={order.order_id}")
+        result = response.get("Result") if isinstance(response, dict) else None
+        if result is not None and int(result) != 0:
+            message = response.get("Msg") or response.get("Message") or "注文照会に失敗しました。"
+            order.last_error = f"kabuステーションAPI照会エラー(Result={result}): {message}"
+            return OrderPollResult(status=OrderStatus.ERROR)
         order_payload = self._find_order_payload(order.order_id, response)
         status = self._map_order_status(order_payload)
         filled_qty = self._extract_filled_qty(order_payload)
@@ -248,7 +259,12 @@ class KabuStationBroker(BrokerInterface):
             "Password": self._require_trading_password(),
         }
         response = self.request_json("PUT", "/kabusapi/cancelorder", payload)
-        return int(response.get("Result", 1)) == 0
+        result = response.get("Result", 1)
+        if int(result) != 0:
+            message = response.get("Msg") or response.get("Message") or "注文キャンセルに失敗しました。"
+            order.last_error = f"kabuステーションAPIキャンセルエラー(Result={result}): {message}"
+            return False
+        return True
     
     def _request_json(
         self,
@@ -337,7 +353,8 @@ class KabuStationBroker(BrokerInterface):
 
     @staticmethod
     def _map_order_status(payload: dict) -> OrderStatus:
-        state = str(payload.get("State") or payload.get("OrderState") or "").lower()
+        state = str(payload.get("State") or payload.get("OrderState") or payload.get("Status") or "").lower()
+        # TODO: kabuステーションAPI仕様の状態コードと対応表を反映する。
         if any(key in state for key in ("done", "filled", "約定", "complete")):
             return OrderStatus.FILLED
         if any(key in state for key in ("canceled", "cancel", "expired", "失効")):
@@ -390,6 +407,7 @@ class OrderRepository:
                     expire_day INTEGER,
                     front_order_type INTEGER,
                     price REAL,
+                    filled_qty REAL,
                     status TEXT NOT NULL,
                     created_at REAL NOT NULL
                 )
@@ -415,6 +433,7 @@ class OrderRepository:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_role ON orders(role)")
             self._ensure_column(conn, "orders", "symbol_code", "TEXT")
             self._ensure_column(conn, "orders", "time_in_force", "TEXT")
+            self._ensure_column(conn, "orders", "filled_qty", "REAL")
 
     def _ensure_columns(self, conn: sqlite3.Connection, columns: Dict[str, str]) -> None:
         existing_columns = {
@@ -446,8 +465,8 @@ class OrderRepository:
                 INSERT OR IGNORE INTO orders (
                     order_id, role, order_type, qty, symbol, exchange, side, security_type,
                     cash_margin, margin_trade_type, account_type, deliv_type, expire_day,
-                    front_order_type, symbol_code, time_in_force, price, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    front_order_type, symbol_code, time_in_force, price, filled_qty, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order.order_id,
@@ -467,6 +486,7 @@ class OrderRepository:
                     order.symbol_code,
                     order.time_in_force,
                     order.price,
+                    order.filled_qty,
                     order.status.name,
                     order.created_at,
                 ),
@@ -477,8 +497,8 @@ class OrderRepository:
             return
         with self._connect() as conn:
             conn.execute(
-                "UPDATE orders SET status = ? WHERE order_id = ?",
-                (order.status.name, order.order_id),
+                "UPDATE orders SET status = ?, filled_qty = ? WHERE order_id = ?",
+                (order.status.name, order.filled_qty, order.order_id),
             )
 
 
@@ -582,12 +602,32 @@ class AutoTrader:
             # 利確/損切価格が未設定ならエラーにする
             self.state = AutoTraderState.ERROR
             return
+        exit_side = self._resolve_exit_side()
+        if exit_side is None and not isinstance(self.broker, DemoBroker):
+            self.state = AutoTraderState.ERROR
+            return
+        base_kwargs = {
+            "symbol": self.entry_order.symbol,
+            "exchange": self.entry_order.exchange,
+            "side": exit_side,
+            "security_type": self.entry_order.security_type,
+            "cash_margin": self.entry_order.cash_margin,
+            "margin_trade_type": self.entry_order.margin_trade_type,
+            "account_type": self.entry_order.account_type,
+            "deliv_type": self.entry_order.deliv_type,
+            "expire_day": self.entry_order.expire_day,
+            "front_order_type": self.entry_order.front_order_type,
+            "symbol_code": self.entry_order.symbol_code,
+            "time_in_force": self.entry_order.time_in_force,
+        }
+        # TODO: exit注文のFrontOrderTypeはAPI仕様に従って明示的に設定する。        
         # エントリー数量に合わせて両建ての出口注文を作る
         self.exit_profit_order = Order(
             role=OrderRole.EXIT_PROFIT,
             order_type="LIMIT",
             qty=self.entry_order.qty,
             price=self._profit_price,
+            **base_kwargs,
         )
         
         self.exit_loss_order = Order(
@@ -595,6 +635,7 @@ class AutoTrader:
             order_type="STOP",
             qty=self.entry_order.qty,
             price=self._loss_price,
+            **base_kwargs,
         )
         print(
             "[demo] create exit orders: "
@@ -700,10 +741,33 @@ class AutoTrader:
             order_type=order.order_type,
             qty=remaining_qty,
             price=order.price,
+            symbol=order.symbol,
+            exchange=order.exchange,
+            side=order.side,
+            security_type=order.security_type,
+            cash_margin=order.cash_margin,
+            margin_trade_type=order.margin_trade_type,
+            account_type=order.account_type,
+            deliv_type=order.deliv_type,
+            expire_day=order.expire_day,
+            front_order_type=order.front_order_type,
+            symbol_code=order.symbol_code,
+            time_in_force=order.time_in_force,
         )
         self.orders[replacement.role] = replacement
         replacement.place(self.broker, repository=self.repository)
         return True
+    def _resolve_exit_side(self) -> Optional[int]:
+        if not self.entry_order:
+            return None
+        if self.entry_order.side is None:
+            return None
+        # TODO: kabuステーションAPIのSide仕様に合わせて明示的に変換する。
+        if self.entry_order.side == 1:
+            return 2
+        if self.entry_order.side == 2:
+            return 1
+        return None
 
 def run_demo(
     poll_interval_sec: float = 0.5,

@@ -58,6 +58,20 @@ class DemoWorker(QThread):
     def stop(self) -> None:
         self._stop_requested = True
 
+    @staticmethod
+    def build_entry_order(inputs: TradeInputs, entry_price: Optional[float]) -> Order:
+        return Order(
+            role=OrderRole.ENTRY,
+            order_type=inputs.entry_order_type,
+            qty=inputs.qty,
+            symbol=inputs.symbol_code,
+            exchange=inputs.exchange,
+            symbol_code=inputs.symbol_code,
+            side=inputs.side_code,
+            cash_margin=inputs.cash_margin,
+            margin_trade_type=inputs.margin_trade_type,
+            price=entry_price,
+        )
     def _wait_until_scheduled(self) -> bool:
         if not self.inputs.scheduled_epoch:
             return True
@@ -82,19 +96,7 @@ class DemoWorker(QThread):
         entry_price = (
             self.inputs.entry_price if self.inputs.entry_order_type == "LIMIT" else None
         )
-        entry_order = Order(
-            role=OrderRole.ENTRY,
-            order_type=self.inputs.entry_order_type,
-            qty=self.inputs.qty,
-            symbol=self.inputs.symbol_code,
-            exchange=self.inputs.exchange,
-            qty=1,
-            symbol_code=self.inputs.symbol_code,
-            side=self.inputs.side_code,
-            cash_margin=self.inputs.cash_margin,
-            margin_trade_type=self.inputs.margin_trade_type,
-            price=entry_price,
-        )
+        entry_order = self.build_entry_order(self.inputs, entry_price)
 
         self.log_message.emit(
             "[demo] setup: "

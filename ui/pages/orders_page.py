@@ -302,10 +302,19 @@ class OrdersPage(QWidget):
         expire_day_input.setValue(0)
         form.addRow("有効期限(ExpireDay)", expire_day_input)
 
+        advanced_toggle = QCheckBox("詳細設定を表示")
+        form.addRow("", advanced_toggle)
+
+        advanced_group = QGroupBox("詳細設定")
+        advanced_group.setVisible(False)
+        advanced_layout = QFormLayout(advanced_group)
+        advanced_layout.setHorizontalSpacing(16)
+        advanced_layout.setVerticalSpacing(10)
+
         close_positions_input = QPlainTextEdit()
         close_positions_input.setPlaceholderText("例: HoldID,数量\n123456,100")
         close_positions_input.setMaximumHeight(72)
-        form.addRow("信用返済(ClosePositions)", close_positions_input)
+        advanced_layout.addRow("信用返済(ClosePositions)", close_positions_input)
         
         time_in_force_input = QLineEdit()
         time_in_force_input.setPlaceholderText("例: DAY / IOC")
@@ -344,20 +353,35 @@ class OrdersPage(QWidget):
         form.addRow("実行日時", schedule_time_input)
 
         layout.addLayout(form)
+        layout.addWidget(advanced_group)
 
         order_type_input.currentTextChanged.connect(
             lambda value, target=entry_price_input: self._toggle_entry_price(target, value)
         )
         cash_margin_input.currentIndexChanged.connect(
-            lambda _, target=margin_trade_type_input, source=cash_margin_input: self._toggle_margin_trade_type(
-                target, source
+            lambda _, target=margin_trade_type_input, source=cash_margin_input, group=advanced_group, toggle=advanced_toggle: (
+                self._toggle_margin_trade_type(target, source),
+                self._toggle_advanced_settings(group, toggle, source, target),
             )
-        )        
+        )
+        margin_trade_type_input.currentIndexChanged.connect(
+            lambda _, target=advanced_group, toggle=advanced_toggle, cash=cash_margin_input, margin=margin_trade_type_input: (
+                self._toggle_advanced_settings(target, toggle, cash, margin)
+            )
+        )
+        advanced_toggle.stateChanged.connect(
+            lambda _, target=advanced_group, toggle=advanced_toggle, cash=cash_margin_input, margin=margin_trade_type_input: (
+                self._toggle_advanced_settings(target, toggle, cash, margin)
+            )
+        )
         schedule_type_input.currentTextChanged.connect(
             lambda value, target=schedule_time_input: self._toggle_schedule(target, value)
         )
         self._toggle_entry_price(entry_price_input, order_type_input.currentText())
-        self._toggle_margin_trade_type(margin_trade_type_input, cash_margin_input)        
+        self._toggle_margin_trade_type(margin_trade_type_input, cash_margin_input)
+        self._toggle_advanced_settings(
+            advanced_group, advanced_toggle, cash_margin_input, margin_trade_type_input
+        )
         self._toggle_schedule(schedule_time_input, schedule_type_input.currentText())
 
         demo_controls = QGroupBox("デモ実行パラメータ")
@@ -389,6 +413,8 @@ class OrdersPage(QWidget):
             "deliv_type_input": deliv_type_input,
             "expire_day_input": expire_day_input,
             "close_positions_input": close_positions_input,
+            "advanced_toggle": advanced_toggle,
+            "advanced_group": advanced_group,
             "time_in_force_input": time_in_force_input,
             "order_type_input": order_type_input,
             "entry_price_input": entry_price_input,
@@ -495,6 +521,17 @@ class OrdersPage(QWidget):
         is_margin = cash_margin_input.currentData() == 2
         margin_trade_type_input.setVisible(is_margin)
 
+    def _toggle_advanced_settings(
+        self,
+        advanced_group: QGroupBox,
+        advanced_toggle: QCheckBox,
+        cash_margin_input: QComboBox,
+        margin_trade_type_input: QComboBox,
+    ) -> None:
+        is_margin = cash_margin_input.currentData() == 2
+        is_repay = margin_trade_type_input.currentData() == 2
+        advanced_group.setVisible(advanced_toggle.isChecked() and is_margin and is_repay)
+        
     def _localize_state(self, state: str) -> tuple[str, str]:
         key = state.upper() if state else "-"
         label = STATUS_LABELS.get(key, state if state else "-")

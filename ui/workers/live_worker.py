@@ -59,6 +59,24 @@ class LiveWorker(QThread):
             trading_password=self.inputs.trading_password,
             api_token=self.inputs.api_token,
         )
+        if (
+            self.inputs.cash_margin == 2
+            and self.inputs.margin_trade_type == 2
+            and not self.inputs.close_positions
+        ):
+            try:
+                self.inputs.close_positions = broker.resolve_close_positions(
+                    self.inputs.symbol_code,
+                    self.inputs.side_code,
+                    self.inputs.qty,
+                )
+                self.log_message.emit(
+                    "[live] ClosePositions auto-set from positions (credit repay)"
+                )
+            except RuntimeError as exc:
+                self.log_message.emit(f"[live] 返済用建玉の取得に失敗: {exc}")
+                self.finished_state.emit("ERROR")
+                return
         trader = AutoTrader(broker, config=config)
         entry_price = (
             self.inputs.entry_price if self.inputs.entry_order_type == "LIMIT" else None

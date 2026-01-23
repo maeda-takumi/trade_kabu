@@ -269,24 +269,28 @@ class MainWindow(QMainWindow):
                 if cash_margin == 2
                 else None
             )
-            close_positions_text = input_set["close_positions_input"].toPlainText().strip()
             close_positions = None
-            if close_positions_text:
-                close_positions = []
-                for raw_line in close_positions_text.splitlines():
-                    line = raw_line.strip()
-                    if not line:
-                        continue
-                    parts = [part.strip() for part in line.split(",")]
-                    if len(parts) != 2:
-                        continue
-                    hold_id, qty_text = parts
-                    try:
-                        qty_value = float(qty_text)
-                    except ValueError:
-                        continue
-                    if hold_id:
-                        close_positions.append({"HoldID": hold_id, "Qty": qty_value})  
+            if (
+                input_set["advanced_toggle"].isChecked()
+                and input_set["advanced_group"].isVisible()
+            ):
+                close_positions_text = input_set["close_positions_input"].toPlainText().strip()
+                if close_positions_text:
+                    close_positions = []
+                    for raw_line in close_positions_text.splitlines():
+                        line = raw_line.strip()
+                        if not line:
+                            continue
+                        parts = [part.strip() for part in line.split(",")]
+                        if len(parts) != 2:
+                            continue
+                        hold_id, qty_text = parts
+                        try:
+                            qty_value = float(qty_text)
+                        except ValueError:
+                            continue
+                        if hold_id:
+                            close_positions.append({"HoldID": hold_id, "Qty": qty_value})
             inputs.append(
                 TradeInputs(
                     symbol_code=input_set["symbol_input"].text().strip() or "N/A",

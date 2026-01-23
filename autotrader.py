@@ -536,10 +536,10 @@ class OrderRepository:
                 INSERT OR IGNORE INTO orders (
                     order_id, role, order_type, qty, symbol, exchange, side, security_type,
                     cash_margin, margin_trade_type, account_type, deliv_type, expire_day,
-                    front_order_type, symbol_code, time_in_force, price, stop_trigger_price,
-                    stop_after_hit_order_type, stop_after_hit_price, stop_under_over, filled_qty,
-                    status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    front_order_type, symbol_code, time_in_force, close_position_id, price,
+                    stop_trigger_price, stop_after_hit_order_type, stop_after_hit_price,
+                    stop_under_over, filled_qty, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order.order_id,
@@ -555,7 +555,7 @@ class OrderRepository:
                     order.account_type,
                     order.deliv_type,
                     order.expire_day,
-                    order.front_order_type,                    
+                    order.front_order_type,
                     order.symbol_code,
                     order.time_in_force,
                     order.close_position_id,

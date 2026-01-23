@@ -63,7 +63,20 @@ class SettingsPage(QWidget):
         self.force_deadline_before_input.setValue(10)
         group_layout.addRow("強制決済デッドライン(分)", self.force_deadline_before_input)
 
-        layout.addWidget(group)
+        self.force_exit_use_close_input = QCheckBox("閉場時刻で自動成行決済を有効にする")
+        self.force_exit_use_close_input.setChecked(True)
+        group_layout.addRow("", self.force_exit_use_close_input)
+
+        self.market_close_hour_input = QSpinBox()
+        self.market_close_hour_input.setRange(0, 23)
+        self.market_close_hour_input.setValue(15)
+        group_layout.addRow("大引け時刻(時)", self.market_close_hour_input)
+
+        self.market_close_minute_input = QSpinBox()
+        self.market_close_minute_input.setRange(0, 59)
+        self.market_close_minute_input.setValue(0)
+        group_layout.addRow("大引け時刻(分)", self.market_close_minute_input)
+
         layout.addWidget(group)
 
     def _build_kabu_settings(self, layout: QVBoxLayout) -> None:

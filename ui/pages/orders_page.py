@@ -5,6 +5,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateTimeEdit,
     QDoubleSpinBox,
@@ -281,6 +282,30 @@ class OrdersPage(QWidget):
         form.addRow("信用新規/返済", margin_trade_type_input)
         # TODO: kabuステーションAPI仕様で信用区分が不要な場合は削除する。
 
+        security_type_input = QSpinBox()
+        security_type_input.setRange(0, 99)
+        security_type_input.setValue(0)
+        form.addRow("商品区分コード(SecurityType)", security_type_input)
+
+        account_type_input = QSpinBox()
+        account_type_input.setRange(0, 99)
+        account_type_input.setValue(0)
+        form.addRow("口座種別(AccountType)", account_type_input)
+
+        deliv_type_input = QSpinBox()
+        deliv_type_input.setRange(0, 99)
+        deliv_type_input.setValue(0)
+        form.addRow("受渡区分(DelivType)", deliv_type_input)
+
+        expire_day_input = QSpinBox()
+        expire_day_input.setRange(0, 99999999)
+        expire_day_input.setValue(0)
+        form.addRow("有効期限(ExpireDay)", expire_day_input)
+
+        time_in_force_input = QLineEdit()
+        time_in_force_input.setPlaceholderText("例: DAY / IOC")
+        form.addRow("執行条件(TimeInForce)", time_in_force_input)
+
         order_type_input = QComboBox()
         order_type_input.addItems(["成行", "指値"])
         form.addRow("成行/価格指定", order_type_input)
@@ -354,6 +379,11 @@ class OrdersPage(QWidget):
             "side_input": side_input,
             "cash_margin_input": cash_margin_input,
             "margin_trade_type_input": margin_trade_type_input,
+            "security_type_input": security_type_input,
+            "account_type_input": account_type_input,
+            "deliv_type_input": deliv_type_input,
+            "expire_day_input": expire_day_input,
+            "time_in_force_input": time_in_force_input,
             "order_type_input": order_type_input,
             "entry_price_input": entry_price_input,
             "profit_price_input": profit_price_input,
@@ -496,7 +526,12 @@ class OrdersPage(QWidget):
                 self.qty_input = inputs["qty_input"]
                 self.side_input = inputs["side_input"]
                 self.cash_margin_input = inputs["cash_margin_input"]
-                self.margin_trade_type_input = inputs["margin_trade_type_input"]                
+                self.margin_trade_type_input = inputs["margin_trade_type_input"]
+                self.security_type_input = inputs["security_type_input"]
+                self.account_type_input = inputs["account_type_input"]
+                self.deliv_type_input = inputs["deliv_type_input"]
+                self.expire_day_input = inputs["expire_day_input"]
+                self.time_in_force_input = inputs["time_in_force_input"]               
                 self.order_type_input = inputs["order_type_input"]
                 self.entry_price_input = inputs["entry_price_input"]
                 self.profit_price_input = inputs["profit_price_input"]

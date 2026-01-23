@@ -49,6 +49,9 @@ class LiveWorker(QThread):
             force_exit_max_duration_sec=self.inputs.force_exit_max_duration_sec,
             force_exit_start_before_close_min=self.inputs.force_exit_start_before_close_min,
             force_exit_deadline_before_close_min=self.inputs.force_exit_deadline_before_close_min,
+            force_exit_use_market_close=self.inputs.force_exit_use_market_close,
+            market_close_hour=self.inputs.market_close_hour,
+            market_close_minute=self.inputs.market_close_minute,
         )
         broker = KabuStationBroker(
             base_url=self.inputs.base_url,
@@ -70,6 +73,11 @@ class LiveWorker(QThread):
             side=self.inputs.side_code,
             cash_margin=self.inputs.cash_margin,
             margin_trade_type=self.inputs.margin_trade_type,
+            security_type=self.inputs.security_type,
+            account_type=self.inputs.account_type,
+            deliv_type=self.inputs.deliv_type,
+            expire_day=self.inputs.expire_day,
+            time_in_force=self.inputs.time_in_force,
             price=entry_price,
         )
 

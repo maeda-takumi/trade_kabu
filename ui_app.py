@@ -246,6 +246,11 @@ class MainWindow(QMainWindow):
     def _collect_inputs(self) -> list[TradeInputs]:
         inputs: list[TradeInputs] = []
         for input_set in self.orders_page.order_inputs:
+            security_type = input_set["security_type_input"].value() or None
+            account_type = input_set["account_type_input"].value() or None
+            deliv_type = input_set["deliv_type_input"].value() or None
+            expire_day = input_set["expire_day_input"].value() or None
+            time_in_force = input_set["time_in_force_input"].text().strip() or None
             entry_order_type = (
                 "MARKET" if input_set["order_type_input"].currentText() == "成行" else "LIMIT"
             )
@@ -279,12 +284,20 @@ class MainWindow(QMainWindow):
                     side_code=side_code,
                     cash_margin=cash_margin,
                     margin_trade_type=margin_trade_type,
+                    security_type=security_type,
+                    account_type=account_type,
+                    deliv_type=deliv_type,
+                    expire_day=expire_day,
+                    time_in_force=time_in_force,
                     poll_interval_sec=input_set["poll_interval_input"].value(),
                     fills_after_polls=input_set["fills_after_input"].value(),
                     force_exit_poll_interval_sec=self.settings_page.force_poll_interval_input.value(),
                     force_exit_max_duration_sec=self.settings_page.force_max_duration_input.value(),
                     force_exit_start_before_close_min=self.settings_page.force_start_before_input.value(),
                     force_exit_deadline_before_close_min=self.settings_page.force_deadline_before_input.value(),
+                    force_exit_use_market_close=self.settings_page.force_exit_use_close_input.isChecked(),
+                    market_close_hour=self.settings_page.market_close_hour_input.value(),
+                    market_close_minute=self.settings_page.market_close_minute_input.value(),
                     base_url=self.settings_page.base_url_input.text().strip(),
                     api_password=self.settings_page.api_password_input.text().strip(),
                     trading_password=self.settings_page.trading_password_input.text().strip(),

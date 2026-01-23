@@ -32,12 +32,20 @@ class TradeInputs:
     side_code: int
     cash_margin: int
     margin_trade_type: Optional[int]
+    security_type: Optional[int]
+    account_type: Optional[int]
+    deliv_type: Optional[int]
+    expire_day: Optional[int]
+    time_in_force: Optional[str]
     poll_interval_sec: float
     fills_after_polls: int
     force_exit_poll_interval_sec: float
     force_exit_max_duration_sec: float
     force_exit_start_before_close_min: int
     force_exit_deadline_before_close_min: int
+    force_exit_use_market_close: bool
+    market_close_hour: int
+    market_close_minute: int
     base_url: str
     api_password: str
     trading_password: str
@@ -70,6 +78,11 @@ class DemoWorker(QThread):
             side=inputs.side_code,
             cash_margin=inputs.cash_margin,
             margin_trade_type=inputs.margin_trade_type,
+            security_type=inputs.security_type,
+            account_type=inputs.account_type,
+            deliv_type=inputs.deliv_type,
+            expire_day=inputs.expire_day,
+            time_in_force=inputs.time_in_force,
             price=entry_price,
         )
     def _wait_until_scheduled(self) -> bool:
@@ -90,6 +103,9 @@ class DemoWorker(QThread):
             force_exit_max_duration_sec=self.inputs.force_exit_max_duration_sec,
             force_exit_start_before_close_min=self.inputs.force_exit_start_before_close_min,
             force_exit_deadline_before_close_min=self.inputs.force_exit_deadline_before_close_min,
+            force_exit_use_market_close=self.inputs.force_exit_use_market_close,
+            market_close_hour=self.inputs.market_close_hour,
+            market_close_minute=self.inputs.market_close_minute,
         )
         broker = DemoBroker(fills_after_polls=self.inputs.fills_after_polls)
         trader = AutoTrader(broker, config=config)      

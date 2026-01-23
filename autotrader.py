@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from enum import Enum, auto
 import json
 from pathlib import Path
@@ -100,6 +101,9 @@ class AutoTraderConfig:
     force_exit_max_duration_sec: float = 600.0  # 強制決済が失敗扱いになるまでの最大時間
     force_exit_start_before_close_min: int = 30  # 大引け前に強制決済を開始する目安
     force_exit_deadline_before_close_min: int = 10  # 大引け前の強制決済デッドライン
+    market_close_hour: int = 15  # 大引け時刻(時)
+    market_close_minute: int = 0  # 大引け時刻(分)
+    force_exit_use_market_close: bool = True  # 閉場時刻で強制成行を動かすか
     reconcile_on_success: bool = True  # 約定成功時の再照合を実施するか
 
 
@@ -414,17 +418,45 @@ class KabuStationBroker(BrokerInterface):
 
     @staticmethod
     def _map_order_status(payload: dict) -> OrderStatus:
-        state = str(payload.get("State") or payload.get("OrderState") or payload.get("Status") or "").lower()
-        # TODO: kabuステーションAPI仕様の状態コードと対応表を反映する。
-        if any(key in state for key in ("done", "filled", "約定", "complete")):
+        state_value = payload.get("State") or payload.get("OrderState") or payload.get("Status")
+        state_text = str(state_value or "").lower()
+        if any(key in state_text for key in ("done", "filled", "約定", "complete")):
             return OrderStatus.FILLED
-        if any(key in state for key in ("canceled", "cancel", "expired", "失効")):
+        if any(key in state_text for key in ("canceled", "cancel", "expired", "失効")):
             return OrderStatus.CANCELED
-        if any(key in state for key in ("rejected", "reject", "却下")):
+        if any(key in state_text for key in ("rejected", "reject", "却下")):
             return OrderStatus.REJECTED
-        if any(key in state for key in ("partial", "一部")):
+        if any(key in state_text for key in ("partial", "一部")):
             return OrderStatus.PARTIAL
-        if state:
+        if state_text.isdigit():
+            state_code = int(state_text)
+            status_map = {
+                1: OrderStatus.SENT,
+                2: OrderStatus.SENT,
+                3: OrderStatus.PARTIAL,
+                4: OrderStatus.FILLED,
+                5: OrderStatus.CANCELED,
+                6: OrderStatus.REJECTED,
+                7: OrderStatus.CANCELED,
+                8: OrderStatus.CANCELED,
+            }
+            mapped_status = status_map.get(state_code)
+            if mapped_status:
+                return mapped_status
+        qty = payload.get("Qty") or payload.get("OrderQty")
+        cum_qty = payload.get("CumQty") or payload.get("FilledQty") or payload.get("ExecuteQty")
+        try:
+            qty_value = float(qty) if qty is not None else None
+            cum_value = float(cum_qty) if cum_qty is not None else None
+        except (TypeError, ValueError):
+            qty_value = None
+            cum_value = None
+        if qty_value and cum_value is not None:
+            if cum_value >= qty_value:
+                return OrderStatus.FILLED
+            if 0 < cum_value < qty_value:
+                return OrderStatus.PARTIAL
+        if state_text:
             return OrderStatus.SENT
         return OrderStatus.ERROR
 
@@ -775,8 +807,31 @@ class AutoTrader:
 
     def poll(self) -> None:
         """状態に応じて注文のポーリング処理を実行する。"""
+        self._maybe_force_exit_by_market_close()
         if self.state in (AutoTraderState.ENTRY_WAIT, AutoTraderState.EXIT_WAIT, AutoTraderState.FORCE_EXITING):
             self._poll_active_orders()
+
+    def _maybe_force_exit_by_market_close(self) -> None:
+        if not self.config.force_exit_use_market_close:
+            return
+        if self.state in (AutoTraderState.EXIT_FILLED, AutoTraderState.ERROR):
+            return
+        now = datetime.now()
+        close_time = now.replace(
+            hour=self.config.market_close_hour,
+            minute=self.config.market_close_minute,
+            second=0,
+            microsecond=0,
+        )
+        start_time = close_time - timedelta(minutes=self.config.force_exit_start_before_close_min)
+        deadline_time = close_time - timedelta(minutes=self.config.force_exit_deadline_before_close_min)
+        if now < start_time:
+            return
+        if self.state != AutoTraderState.FORCE_EXITING:
+            if now <= deadline_time:
+                self.force_exit_market()
+            else:
+                self._enter_error_state()
 
     def _poll_active_orders(self) -> None:
         """アクティブな注文をポーリングし、状態遷移を処理する。"""

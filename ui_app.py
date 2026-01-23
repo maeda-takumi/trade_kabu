@@ -8,8 +8,8 @@ from ui.pages.history_page import HistoryPage
 from ui.pages.orders_page import OrdersPage
 from ui.pages.settings_page import SettingsPage
 from ui.widgets.sidebar import Sidebar
-from ui.workers.demo_worker import DemoInputs, DemoWorker
-
+from ui.workers.demo_worker import TradeInputs, DemoWorker
+from ui.workers.live_worker import LiveWorker
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -47,8 +47,9 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(self.stack, 1)
 
         self.sidebar.list_widget.currentRowChanged.connect(self.stack.setCurrentIndex)
-        self.orders_page.start_requested.connect(self._start_demo)
-        self.orders_page.stop_requested.connect(self._stop_demo)
+        self.orders_page.start_requested.connect(self._start_trade)
+        self.orders_page.stop_requested.connect(self._stop_trade)
+
 
         main_layout.addWidget(content_wrapper, 1)
         self._apply_style()
@@ -242,8 +243,8 @@ class MainWindow(QMainWindow):
             """
         )
 
-    def _collect_inputs(self) -> list[DemoInputs]:
-        inputs: list[DemoInputs] = []
+    def _collect_inputs(self) -> list[TradeInputs]:
+        inputs: list[TradeInputs] = []
         for input_set in self.orders_page.order_inputs:
             entry_order_type = (
                 "MARKET" if input_set["order_type_input"].currentText() == "成行" else "LIMIT"
@@ -264,8 +265,10 @@ class MainWindow(QMainWindow):
                 else None
             )                
             inputs.append(
-                DemoInputs(
+                TradeInputs(
                     symbol_code=input_set["symbol_input"].text().strip() or "N/A",
+                    exchange=input_set["exchange_input"].value(),
+                    qty=input_set["qty_input"].value(),
                     entry_order_type=entry_order_type,
                     entry_price=entry_price,
                     profit_price=input_set["profit_price_input"].value(),
@@ -282,15 +285,21 @@ class MainWindow(QMainWindow):
                     force_exit_max_duration_sec=self.settings_page.force_max_duration_input.value(),
                     force_exit_start_before_close_min=self.settings_page.force_start_before_input.value(),
                     force_exit_deadline_before_close_min=self.settings_page.force_deadline_before_input.value(),
+                    base_url=self.settings_page.base_url_input.text().strip(),
+                    api_password=self.settings_page.api_password_input.text().strip(),
+                    trading_password=self.settings_page.trading_password_input.text().strip(),
+                    api_token=self.settings_page.api_token_input.text().strip() or None,
                 )
             )
         return inputs
 
-    def _start_demo(self) -> None:
+    def _start_trade(self) -> None:
         if any(worker.isRunning() for worker in self.workers):
             return
         inputs_list = self._collect_inputs()
         self.workers.clear()
+        mode = self.orders_page.mode_input.currentText()
+        is_live = mode == "実運用"
         rows = []
         for index, inputs in enumerate(inputs_list, start=1):
             rows.append(
@@ -305,7 +314,7 @@ class MainWindow(QMainWindow):
         self.orders_page.reset_status_rows(rows)
 
         for index, inputs in enumerate(inputs_list):
-            worker = DemoWorker(inputs)
+            worker = LiveWorker(inputs) if is_live else DemoWorker(inputs)
             worker.state_changed.connect(
                 lambda state, row=index: self.orders_page.update_status_row(row, state)
             )
@@ -324,7 +333,7 @@ class MainWindow(QMainWindow):
         self.orders_page.start_button.setEnabled(False)
         self.orders_page.stop_button.setEnabled(True)
 
-    def _stop_demo(self) -> None:
+    def _stop_trade(self) -> None:
         for worker in self.workers:
             worker.stop()
         self.orders_page.stop_button.setEnabled(False)

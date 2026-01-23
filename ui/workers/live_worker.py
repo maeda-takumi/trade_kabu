@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 import time
 from typing import Optional
@@ -11,40 +10,14 @@ from autotrader import (
     AutoTrader,
     AutoTraderConfig,
     AutoTraderState,
-    DemoBroker,
+    KabuStationBroker,
     Order,
     OrderRole,
 )
+from ui.workers.demo_worker import TradeInputs
 
 
-@dataclass
-class TradeInputs:
-    symbol_code: str
-    exchange: int
-    qty: int
-    entry_order_type: str
-    entry_price: Optional[float]
-    profit_price: float
-    loss_price: float
-    schedule_type: str
-    scheduled_epoch: Optional[float]
-    side_label: str
-    side_code: int
-    cash_margin: int
-    margin_trade_type: Optional[int]
-    poll_interval_sec: float
-    fills_after_polls: int
-    force_exit_poll_interval_sec: float
-    force_exit_max_duration_sec: float
-    force_exit_start_before_close_min: int
-    force_exit_deadline_before_close_min: int
-    base_url: str
-    api_password: str
-    trading_password: str
-    api_token: Optional[str]
-
-
-class DemoWorker(QThread):
+class LiveWorker(QThread):
     log_message = Signal(str)
     state_changed = Signal(str)
     exit_status_changed = Signal(str, str)
@@ -63,7 +36,7 @@ class DemoWorker(QThread):
             return True
         while True:
             if self._stop_requested:
-                self.log_message.emit("[demo] stop requested before scheduled start")
+                self.log_message.emit("[live] stop requested before scheduled start")
                 return False
             now = time.time()
             if now >= self.inputs.scheduled_epoch:
@@ -77,8 +50,13 @@ class DemoWorker(QThread):
             force_exit_start_before_close_min=self.inputs.force_exit_start_before_close_min,
             force_exit_deadline_before_close_min=self.inputs.force_exit_deadline_before_close_min,
         )
-        broker = DemoBroker(fills_after_polls=self.inputs.fills_after_polls)
-        trader = AutoTrader(broker, config=config)      
+        broker = KabuStationBroker(
+            base_url=self.inputs.base_url,
+            api_password=self.inputs.api_password,
+            trading_password=self.inputs.trading_password,
+            api_token=self.inputs.api_token,
+        )
+        trader = AutoTrader(broker, config=config)
         entry_price = (
             self.inputs.entry_price if self.inputs.entry_order_type == "LIMIT" else None
         )
@@ -88,7 +66,6 @@ class DemoWorker(QThread):
             qty=self.inputs.qty,
             symbol=self.inputs.symbol_code,
             exchange=self.inputs.exchange,
-            qty=1,
             symbol_code=self.inputs.symbol_code,
             side=self.inputs.side_code,
             cash_margin=self.inputs.cash_margin,
@@ -97,7 +74,7 @@ class DemoWorker(QThread):
         )
 
         self.log_message.emit(
-            "[demo] setup: "
+            "[live] setup: "
             f"symbol={self.inputs.symbol_code}, exchange={self.inputs.exchange}, qty={self.inputs.qty}, "
             f"side={self.inputs.side_label}, order_type={self.inputs.entry_order_type}, "
             f"entry_price={self.inputs.entry_price}, profit={self.inputs.profit_price}, "
@@ -107,15 +84,15 @@ class DemoWorker(QThread):
         if self.inputs.schedule_type == "予約" and self.inputs.scheduled_epoch:
             scheduled_at = datetime.fromtimestamp(self.inputs.scheduled_epoch)
             self.log_message.emit(
-                f"[demo] scheduled start at {scheduled_at:%Y-%m-%d %H:%M}"
+                f"[live] scheduled start at {scheduled_at:%Y-%m-%d %H:%M}"
             )
             if not self._wait_until_scheduled():
                 self.finished_state.emit("CANCELED")
                 return
         else:
-            self.log_message.emit("[demo] start immediately")
+            self.log_message.emit("[live] start immediately")
 
-        self.log_message.emit(f"[demo] state={trader.state.name} -> start_trade")
+        self.log_message.emit(f"[live] state={trader.state.name} -> start_trade")
         trader.start_trade(
             entry_order,
             profit_price=self.inputs.profit_price,
@@ -123,14 +100,14 @@ class DemoWorker(QThread):
         )
         last_state = trader.state
         self.state_changed.emit(trader.state.name)
-        self.log_message.emit(f"[demo] state={trader.state.name}")
+        self.log_message.emit(f"[live] state={trader.state.name}")
         self._emit_exit_statuses(trader, None)
 
         stopping = False
         last_exit_statuses: Optional[tuple[str, str]] = None
         while trader.state not in (AutoTraderState.EXIT_FILLED, AutoTraderState.ERROR):
             if self._stop_requested:
-                self.log_message.emit("[demo] stop requested by user")
+                self.log_message.emit("[live] stop requested by user")
                 if trader.state in (AutoTraderState.IDLE, AutoTraderState.ENTRY_WAIT):
                     trader.cancel_all_orders()
                     self.state_changed.emit(trader.state.name)
@@ -141,14 +118,14 @@ class DemoWorker(QThread):
                     stopping = True
                     if trader.state != last_state:
                         self.log_message.emit(
-                            f"[demo] state={last_state.name} -> {trader.state.name}"
+                            f"[live] state={last_state.name} -> {trader.state.name}"
                         )
                         last_state = trader.state
                         self.state_changed.emit(trader.state.name)
             trader.poll()
             if trader.state != last_state:
                 self.log_message.emit(
-                    f"[demo] state={last_state.name} -> {trader.state.name}"
+                    f"[live] state={last_state.name} -> {trader.state.name}"
                 )
                 last_state = trader.state
                 self.state_changed.emit(trader.state.name)
@@ -157,7 +134,7 @@ class DemoWorker(QThread):
                 last_exit_statuses = current_exit_statuses
             time.sleep(self.inputs.poll_interval_sec)
 
-        self.log_message.emit(f"[demo] completed with state={trader.state.name}")
+        self.log_message.emit(f"[live] completed with state={trader.state.name}")
         self.state_changed.emit(trader.state.name)
         self._emit_exit_statuses(trader, last_exit_statuses)
         self.finished_state.emit(trader.state.name)

@@ -255,6 +255,16 @@ class OrdersPage(QWidget):
         symbol_input.setPlaceholderText("例: 7203")
         form.addRow("銘柄コード", symbol_input)
 
+        exchange_input = QSpinBox()
+        exchange_input.setRange(1, 99)
+        exchange_input.setValue(1)
+        form.addRow("市場コード", exchange_input)
+
+        qty_input = QSpinBox()
+        qty_input.setRange(1, 100000)
+        qty_input.setValue(100)
+        form.addRow("数量", qty_input)
+
         side_input = QComboBox()
         side_input.addItem("買入", 1)
         side_input.addItem("売入", 2)
@@ -339,6 +349,8 @@ class OrdersPage(QWidget):
         layout.addWidget(demo_controls)
         return {
             "symbol_input": symbol_input,
+            "exchange_input": exchange_input,
+            "qty_input": qty_input,
             "side_input": side_input,
             "cash_margin_input": cash_margin_input,
             "margin_trade_type_input": margin_trade_type_input,
@@ -354,7 +366,10 @@ class OrdersPage(QWidget):
 
     def _build_controls(self, layout: QVBoxLayout) -> None:
         button_layout = QHBoxLayout()
-        self.start_button = QPushButton("デモ開始")
+        self.mode_input = QComboBox()
+        self.mode_input.addItems(["デモ", "実運用"])
+        button_layout.addWidget(self.mode_input)
+        self.start_button = QPushButton("開始")
         self.start_button.setObjectName("primaryButton")
         self.start_button.clicked.connect(self.start_requested.emit)
 
@@ -477,6 +492,8 @@ class OrdersPage(QWidget):
 
             if index == 0:
                 self.symbol_input = inputs["symbol_input"]
+                self.exchange_input = inputs["exchange_input"]
+                self.qty_input = inputs["qty_input"]
                 self.side_input = inputs["side_input"]
                 self.cash_margin_input = inputs["cash_margin_input"]
                 self.margin_trade_type_input = inputs["margin_trade_type_input"]                

@@ -83,6 +83,10 @@ class SettingsPage(QWidget):
         self.api_password_input.setEchoMode(QLineEdit.EchoMode.Password)
         group_layout.addRow("APIパスワード", self.api_password_input)
 
+        self.trading_password_input = QLineEdit()
+        self.trading_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        group_layout.addRow("取引パスワード", self.trading_password_input)
+
         self.api_token_input = QLineEdit()
         group_layout.addRow("APIトークン", self.api_token_input)
 

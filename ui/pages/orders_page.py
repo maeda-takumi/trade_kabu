@@ -302,6 +302,11 @@ class OrdersPage(QWidget):
         expire_day_input.setValue(0)
         form.addRow("有効期限(ExpireDay)", expire_day_input)
 
+        close_positions_input = QPlainTextEdit()
+        close_positions_input.setPlaceholderText("例: HoldID,数量\n123456,100")
+        close_positions_input.setMaximumHeight(72)
+        form.addRow("信用返済(ClosePositions)", close_positions_input)
+        
         time_in_force_input = QLineEdit()
         time_in_force_input.setPlaceholderText("例: DAY / IOC")
         form.addRow("執行条件(TimeInForce)", time_in_force_input)
@@ -383,6 +388,7 @@ class OrdersPage(QWidget):
             "account_type_input": account_type_input,
             "deliv_type_input": deliv_type_input,
             "expire_day_input": expire_day_input,
+            "close_positions_input": close_positions_input,
             "time_in_force_input": time_in_force_input,
             "order_type_input": order_type_input,
             "entry_price_input": entry_price_input,

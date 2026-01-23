@@ -37,6 +37,7 @@ class TradeInputs:
     deliv_type: Optional[int]
     expire_day: Optional[int]
     time_in_force: Optional[str]
+    close_positions: Optional[list[dict]]
     poll_interval_sec: float
     fills_after_polls: int
     force_exit_poll_interval_sec: float
@@ -84,6 +85,7 @@ class DemoWorker(QThread):
             expire_day=inputs.expire_day,
             time_in_force=inputs.time_in_force,
             price=entry_price,
+            close_positions=inputs.close_positions,
         )
     def _wait_until_scheduled(self) -> bool:
         if not self.inputs.scheduled_epoch:

@@ -133,6 +133,7 @@ class Order:
     time_in_force: Optional[str] = None
     price: Optional[float] = None
     close_position_id: Optional[str] = None
+    close_positions: Optional[list[dict]] = None
     stop_trigger_price: Optional[float] = None
     stop_after_hit_order_type: Optional[int] = None
     stop_after_hit_price: Optional[float] = None
@@ -388,6 +389,15 @@ class KabuStationBroker(BrokerInterface):
                 payload[key] = value
         if order.close_position_id:
             payload["ClosePositions"] = [{"HoldID": order.close_position_id, "Qty": order.qty}]
+        if order.close_positions:
+            close_positions: list[dict] = []
+            for position in order.close_positions:
+                hold_id = position.get("HoldID")
+                qty_value = position.get("Qty")
+                if not hold_id or qty_value is None:
+                    raise RuntimeError("ClosePositionsのHoldIDとQtyが不足しています。")
+                close_positions.append({"HoldID": hold_id, "Qty": qty_value})
+            payload["ClosePositions"] = close_positions
         if order.stop_trigger_price is not None:
             if order.stop_under_over is None or order.stop_after_hit_order_type is None:
                 raise RuntimeError("逆指値条件に必要な項目が不足しています。")
@@ -398,8 +408,23 @@ class KabuStationBroker(BrokerInterface):
             }
             if order.stop_after_hit_price is not None:
                 reverse_limit["AfterHitPrice"] = order.stop_after_hit_price
-            payload["ReverseLimitOrder"] = reverse_limit                
+            payload["ReverseLimitOrder"] = reverse_limit            
+        self._validate_order_payload(payload, order)                
         return payload
+
+    @staticmethod
+    def _validate_order_payload(payload: dict, order: Order) -> None:
+        front_order_type = payload.get("FrontOrderType")
+        limit_types = {20, 21, 22, 24, 32}
+        stop_types = {30, 31, 32}
+        if front_order_type in limit_types and payload.get("Price") is None:
+            raise RuntimeError("指値系の注文にはPriceが必須です。")
+        if front_order_type in stop_types and "ReverseLimitOrder" not in payload:
+            raise RuntimeError("逆指値注文にはReverseLimitOrderが必須です。")
+        if front_order_type == 32:
+            reverse_limit = payload.get("ReverseLimitOrder", {})
+            if reverse_limit.get("AfterHitPrice") is None:
+                raise RuntimeError("逆指値(指値)ではAfterHitPriceが必須です。")
 
     @staticmethod
     def _find_order_payload(order_id: str, response: dict) -> dict:
@@ -500,6 +525,7 @@ class OrderRepository:
                     expire_day INTEGER,
                     front_order_type INTEGER,
                     close_position_id TEXT,
+                    close_positions TEXT,
                     price REAL,
                     stop_trigger_price REAL,
                     stop_after_hit_order_type INTEGER,
@@ -563,44 +589,89 @@ class OrderRepository:
         if order.order_id is None:
             return
         with self._connect() as conn:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO orders (
-                    order_id, role, order_type, qty, symbol, exchange, side, security_type,
-                    cash_margin, margin_trade_type, account_type, deliv_type, expire_day,
-                    front_order_type, symbol_code, time_in_force, close_position_id, price,
-                    stop_trigger_price, stop_after_hit_order_type, stop_after_hit_price,
-                    stop_under_over, filled_qty, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    order.order_id,
-                    order.role.name,
-                    order.order_type,
-                    order.qty,
-                    order.symbol,
-                    order.exchange,
-                    order.side,
-                    order.security_type,
-                    order.cash_margin,
-                    order.margin_trade_type,
-                    order.account_type,
-                    order.deliv_type,
-                    order.expire_day,
-                    order.front_order_type,
-                    order.symbol_code,
-                    order.time_in_force,
-                    order.close_position_id,
-                    order.price,
-                    order.stop_trigger_price,
-                    order.stop_after_hit_order_type,
-                    order.stop_after_hit_price,
-                    order.stop_under_over,
-                    order.filled_qty,
-                    order.status.name,
-                    order.created_at,
-                ),
-            )
+            try:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO orders (
+                        order_id, role, order_type, qty, symbol, exchange, side, security_type,
+                        cash_margin, margin_trade_type, account_type, deliv_type, expire_day,
+                        front_order_type, symbol_code, time_in_force, close_position_id, price,
+                        stop_trigger_price, stop_after_hit_order_type, stop_after_hit_price,
+                        stop_under_over, close_positions, filled_qty, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        order.order_id,
+                        order.role.name,
+                        order.order_type,
+                        order.qty,
+                        order.symbol,
+                        order.exchange,
+                        order.side,
+                        order.security_type,
+                        order.cash_margin,
+                        order.margin_trade_type,
+                        order.account_type,
+                        order.deliv_type,
+                        order.expire_day,
+                        order.front_order_type,
+                        order.symbol_code,
+                        order.time_in_force,
+                        order.close_position_id,
+                        order.price,
+                        order.stop_trigger_price,
+                        order.stop_after_hit_order_type,
+                        order.stop_after_hit_price,
+                        order.stop_under_over,
+                        json.dumps(order.close_positions) if order.close_positions else None,
+                        order.filled_qty,
+                        order.status.name,
+                        order.created_at,
+                    ),
+                )
+            except sqlite3.OperationalError as exc:
+                if "close_positions" not in str(exc):
+                    raise
+                self._ensure_column(conn, "orders", "close_positions", "TEXT")
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO orders (
+                        order_id, role, order_type, qty, symbol, exchange, side, security_type,
+                        cash_margin, margin_trade_type, account_type, deliv_type, expire_day,
+                        front_order_type, symbol_code, time_in_force, close_position_id, price,
+                        stop_trigger_price, stop_after_hit_order_type, stop_after_hit_price,
+                        stop_under_over, close_positions, filled_qty, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        order.order_id,
+                        order.role.name,
+                        order.order_type,
+                        order.qty,
+                        order.symbol,
+                        order.exchange,
+                        order.side,
+                        order.security_type,
+                        order.cash_margin,
+                        order.margin_trade_type,
+                        order.account_type,
+                        order.deliv_type,
+                        order.expire_day,
+                        order.front_order_type,
+                        order.symbol_code,
+                        order.time_in_force,
+                        order.close_position_id,
+                        order.price,
+                        order.stop_trigger_price,
+                        order.stop_after_hit_order_type,
+                        order.stop_after_hit_price,
+                        order.stop_under_over,
+                        json.dumps(order.close_positions) if order.close_positions else None,
+                        order.filled_qty,
+                        order.status.name,
+                        order.created_at,
+                    ),
+                )
 
     def update_status(self, order: "Order") -> None:
         if order.order_id is None:
@@ -788,6 +859,7 @@ class AutoTrader:
             order_type="MARKET",
             qty=self.entry_order.qty if self.entry_order else 0,
             close_position_id=self.entry_order.close_position_id if self.entry_order else None,
+            close_positions=self.entry_order.close_positions if self.entry_order else None,
             front_order_type=FrontOrderType.MARKET.value,
             **base_kwargs,
         )
@@ -889,6 +961,7 @@ class AutoTrader:
                 stop_after_hit_order_type=order.stop_after_hit_order_type,
                 stop_after_hit_price=order.stop_after_hit_price,
                 stop_under_over=order.stop_under_over,
+                close_positions=order.close_positions,
             )
             self.orders[replacement.role] = replacement
             replacement.place(self.broker, repository=self.repository)
@@ -917,6 +990,7 @@ class AutoTrader:
             stop_after_hit_order_type=order.stop_after_hit_order_type,
             stop_after_hit_price=order.stop_after_hit_price,
             stop_under_over=order.stop_under_over,
+            close_positions=order.close_positions,
         )
         self.orders[replacement.role] = replacement
         replacement.place(self.broker, repository=self.repository)
@@ -957,6 +1031,7 @@ class AutoTrader:
             "symbol_code": self.entry_order.symbol_code,
             "time_in_force": self.entry_order.time_in_force,
             "close_position_id": self.entry_order.close_position_id,
+            "close_positions": self.entry_order.close_positions,
         }
 def run_demo(
     poll_interval_sec: float = 0.5,

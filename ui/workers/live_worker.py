@@ -79,6 +79,7 @@ class LiveWorker(QThread):
             expire_day=self.inputs.expire_day,
             time_in_force=self.inputs.time_in_force,
             price=entry_price,
+            close_positions=self.inputs.close_positions,
         )
 
         self.log_message.emit(

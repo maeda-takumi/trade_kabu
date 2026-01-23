@@ -730,6 +730,8 @@ class AutoTrader:
         self._profit_price = profit_price
         self._loss_price = loss_price
         # 新規エントリー注文を送信
+        if entry_order.cash_margin == 2 and entry_order.margin_trade_type is None:
+            entry_order.margin_trade_type = 1
         if entry_order.front_order_type is None:
             mapped = ORDER_TYPE_TO_FRONT_ORDER_TYPE.get(entry_order.order_type.upper())
             if mapped:
@@ -792,6 +794,8 @@ class AutoTrader:
             self.state = AutoTraderState.ERROR
             return
         base_kwargs = self._build_exit_order_base(exit_side)
+        if self.entry_order.cash_margin == 2:
+            base_kwargs["margin_trade_type"] = 2
         stop_under_over = self._resolve_stop_under_over()
         if stop_under_over is None and not isinstance(self.broker, DemoBroker):
             self.state = AutoTraderState.ERROR

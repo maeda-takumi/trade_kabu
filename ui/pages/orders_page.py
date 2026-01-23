@@ -276,12 +276,6 @@ class OrdersPage(QWidget):
         cash_margin_input.addItem("信用", 2)
         form.addRow("現物/信用区分", cash_margin_input)
 
-        margin_trade_type_input = QComboBox()
-        margin_trade_type_input.addItem("信用新規", 1)
-        margin_trade_type_input.addItem("信用返済", 2)
-        form.addRow("信用新規/返済", margin_trade_type_input)
-        # TODO: kabuステーションAPI仕様で信用区分が不要な場合は削除する。
-
         security_type_input = QSpinBox()
         security_type_input.setRange(0, 99)
         security_type_input.setValue(0)
@@ -316,10 +310,6 @@ class OrdersPage(QWidget):
         close_positions_input.setMaximumHeight(72)
         advanced_layout.addRow("信用返済(ClosePositions)", close_positions_input)
         
-        time_in_force_input = QLineEdit()
-        time_in_force_input.setPlaceholderText("例: DAY / IOC")
-        form.addRow("執行条件(TimeInForce)", time_in_force_input)
-
         order_type_input = QComboBox()
         order_type_input.addItems(["成行", "指値"])
         form.addRow("成行/価格指定", order_type_input)
@@ -359,29 +349,20 @@ class OrdersPage(QWidget):
             lambda value, target=entry_price_input: self._toggle_entry_price(target, value)
         )
         cash_margin_input.currentIndexChanged.connect(
-            lambda _, target=margin_trade_type_input, source=cash_margin_input, group=advanced_group, toggle=advanced_toggle: (
-                self._toggle_margin_trade_type(target, source),
-                self._toggle_advanced_settings(group, toggle, source, target),
-            )
-        )
-        margin_trade_type_input.currentIndexChanged.connect(
-            lambda _, target=advanced_group, toggle=advanced_toggle, cash=cash_margin_input, margin=margin_trade_type_input: (
-                self._toggle_advanced_settings(target, toggle, cash, margin)
+            lambda _, target=advanced_group, toggle=advanced_toggle, source=cash_margin_input: (
+                self._toggle_advanced_settings(target, toggle, source),
             )
         )
         advanced_toggle.stateChanged.connect(
-            lambda _, target=advanced_group, toggle=advanced_toggle, cash=cash_margin_input, margin=margin_trade_type_input: (
-                self._toggle_advanced_settings(target, toggle, cash, margin)
+            lambda _, target=advanced_group, toggle=advanced_toggle, cash=cash_margin_input: (
+                self._toggle_advanced_settings(target, toggle, cash)
             )
         )
         schedule_type_input.currentTextChanged.connect(
             lambda value, target=schedule_time_input: self._toggle_schedule(target, value)
         )
         self._toggle_entry_price(entry_price_input, order_type_input.currentText())
-        self._toggle_margin_trade_type(margin_trade_type_input, cash_margin_input)
-        self._toggle_advanced_settings(
-            advanced_group, advanced_toggle, cash_margin_input, margin_trade_type_input
-        )
+        self._toggle_advanced_settings(advanced_group, advanced_toggle, cash_margin_input)
         self._toggle_schedule(schedule_time_input, schedule_type_input.currentText())
 
         demo_controls = QGroupBox("デモ実行パラメータ")
@@ -407,7 +388,6 @@ class OrdersPage(QWidget):
             "qty_input": qty_input,
             "side_input": side_input,
             "cash_margin_input": cash_margin_input,
-            "margin_trade_type_input": margin_trade_type_input,
             "security_type_input": security_type_input,
             "account_type_input": account_type_input,
             "deliv_type_input": deliv_type_input,
@@ -415,7 +395,6 @@ class OrdersPage(QWidget):
             "close_positions_input": close_positions_input,
             "advanced_toggle": advanced_toggle,
             "advanced_group": advanced_group,
-            "time_in_force_input": time_in_force_input,
             "order_type_input": order_type_input,
             "entry_price_input": entry_price_input,
             "profit_price_input": profit_price_input,
@@ -515,23 +494,14 @@ class OrdersPage(QWidget):
         is_reserved = value == "予約"
         schedule_time_input.setVisible(is_reserved)
 
-    def _toggle_margin_trade_type(
-        self, margin_trade_type_input: QComboBox, cash_margin_input: QComboBox
-    ) -> None:
-        is_margin = cash_margin_input.currentData() == 2
-        margin_trade_type_input.setVisible(is_margin)
-
     def _toggle_advanced_settings(
         self,
         advanced_group: QGroupBox,
         advanced_toggle: QCheckBox,
         cash_margin_input: QComboBox,
-        margin_trade_type_input: QComboBox,
     ) -> None:
         is_margin = cash_margin_input.currentData() == 2
-        is_repay = margin_trade_type_input.currentData() == 2
-        advanced_group.setVisible(advanced_toggle.isChecked() and is_margin and is_repay)
-        
+
     def _localize_state(self, state: str) -> tuple[str, str]:
         key = state.upper() if state else "-"
         label = STATUS_LABELS.get(key, state if state else "-")
@@ -569,12 +539,10 @@ class OrdersPage(QWidget):
                 self.qty_input = inputs["qty_input"]
                 self.side_input = inputs["side_input"]
                 self.cash_margin_input = inputs["cash_margin_input"]
-                self.margin_trade_type_input = inputs["margin_trade_type_input"]
                 self.security_type_input = inputs["security_type_input"]
                 self.account_type_input = inputs["account_type_input"]
                 self.deliv_type_input = inputs["deliv_type_input"]
-                self.expire_day_input = inputs["expire_day_input"]
-                self.time_in_force_input = inputs["time_in_force_input"]               
+                self.expire_day_input = inputs["expire_day_input"]         
                 self.order_type_input = inputs["order_type_input"]
                 self.entry_price_input = inputs["entry_price_input"]
                 self.profit_price_input = inputs["profit_price_input"]

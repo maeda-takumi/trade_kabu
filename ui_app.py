@@ -250,7 +250,6 @@ class MainWindow(QMainWindow):
             account_type = input_set["account_type_input"].value()
             deliv_type = input_set["deliv_type_input"].value()
             expire_day = input_set["expire_day_input"].value()
-            time_in_force = input_set["time_in_force_input"].text().strip() or None
             entry_order_type = (
                 "MARKET" if input_set["order_type_input"].currentText() == "成行" else "LIMIT"
             )
@@ -264,11 +263,6 @@ class MainWindow(QMainWindow):
             side_label = input_set["side_input"].currentText()
             side_code = input_set["side_input"].currentData()
             cash_margin = input_set["cash_margin_input"].currentData()
-            margin_trade_type = (
-                input_set["margin_trade_type_input"].currentData()
-                if cash_margin == 2
-                else None
-            )
             close_positions = None
             if (
                 input_set["advanced_toggle"].isChecked()
@@ -305,12 +299,10 @@ class MainWindow(QMainWindow):
                     side_label=side_label,
                     side_code=side_code,
                     cash_margin=cash_margin,
-                    margin_trade_type=margin_trade_type,
                     security_type=security_type,
                     account_type=account_type,
                     deliv_type=deliv_type,
                     expire_day=expire_day,
-                    time_in_force=time_in_force,
                     close_positions=close_positions,
                     poll_interval_sec=input_set["poll_interval_input"].value(),
                     fills_after_polls=input_set["fills_after_input"].value(),

@@ -31,12 +31,10 @@ class TradeInputs:
     side_label: str
     side_code: int
     cash_margin: int
-    margin_trade_type: Optional[int]
     security_type: Optional[int]
     account_type: Optional[int]
     deliv_type: Optional[int]
     expire_day: Optional[int]
-    time_in_force: Optional[str]
     close_positions: Optional[list[dict]]
     poll_interval_sec: float
     fills_after_polls: int
@@ -78,12 +76,10 @@ class DemoWorker(QThread):
             symbol_code=inputs.symbol_code,
             side=inputs.side_code,
             cash_margin=inputs.cash_margin,
-            margin_trade_type=inputs.margin_trade_type,
             security_type=inputs.security_type,
             account_type=inputs.account_type,
             deliv_type=inputs.deliv_type,
             expire_day=inputs.expire_day,
-            time_in_force=inputs.time_in_force,
             price=entry_price,
             close_positions=inputs.close_positions,
         )

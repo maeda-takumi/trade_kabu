@@ -35,7 +35,9 @@ class TradeInputs:
     account_type: Optional[int]
     deliv_type: Optional[int]
     expire_day: Optional[int]
+    close_position_order: Optional[int]
     close_positions: Optional[list[dict]]
+    fund_type: Optional[str]
     poll_interval_sec: float
     fills_after_polls: int
     force_exit_poll_interval_sec: float
@@ -80,8 +82,10 @@ class DemoWorker(QThread):
             account_type=inputs.account_type,
             deliv_type=inputs.deliv_type,
             expire_day=inputs.expire_day,
+            close_position_order=inputs.close_position_order,
             price=entry_price,
             close_positions=inputs.close_positions,
+            fund_type=inputs.fund_type,
         )
     def _wait_until_scheduled(self) -> bool:
         if not self.inputs.scheduled_epoch:

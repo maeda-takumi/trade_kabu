@@ -133,7 +133,9 @@ class Order:
     time_in_force: Optional[str] = None
     price: Optional[float] = None
     close_position_id: Optional[str] = None
+    close_position_order: Optional[int] = None
     close_positions: Optional[list[dict]] = None
+    fund_type: Optional[str] = None
     stop_trigger_price: Optional[float] = None
     stop_after_hit_order_type: Optional[int] = None
     stop_after_hit_price: Optional[float] = None
@@ -308,7 +310,34 @@ class KabuStationBroker(BrokerInterface):
             order.last_error = f"kabuステーションAPIキャンセルエラー(Result={result}): {message}"
             return False
         return True
-    
+
+    def resolve_close_positions(self, symbol: str, side: int, qty: float) -> list[dict]:
+        """信用返済用に建玉一覧からClosePositionsを組み立てる。"""
+        response = self.request_json("GET", "/kabusapi/positions")
+        positions = self._extract_positions(response)
+        if symbol:
+            positions = [pos for pos in positions if self._get_symbol(pos) == symbol]
+        matched = [
+            pos for pos in positions if self._get_side(pos) in (None, side)
+        ]
+        if not matched:
+            matched = positions
+        remaining = qty
+        close_positions: list[dict] = []
+        for pos in matched:
+            if remaining <= 0:
+                break
+            hold_id = self._get_hold_id(pos)
+            position_qty = self._get_qty(pos)
+            if not hold_id or position_qty <= 0:
+                continue
+            use_qty = min(position_qty, remaining)
+            close_positions.append({"HoldID": hold_id, "Qty": use_qty})
+            remaining -= use_qty
+        if remaining > 0:
+            raise RuntimeError("返済対象の建玉数量が不足しています。")
+        return close_positions
+        
     def _request_json(
         self,
         method: str,
@@ -383,6 +412,8 @@ class KabuStationBroker(BrokerInterface):
             "ExpireDay": order.expire_day,
             "Price": order.price,
             "TimeInForce": order.time_in_force,
+            "ClosePositionOrder": order.close_position_order,
+            "FundType": order.fund_type,
         }
         for key, value in optional_fields.items():
             if value is not None:
@@ -426,6 +457,53 @@ class KabuStationBroker(BrokerInterface):
             if reverse_limit.get("AfterHitPrice") is None:
                 raise RuntimeError("逆指値(指値)ではAfterHitPriceが必須です。")
 
+    @staticmethod
+    def _extract_positions(response: dict | list) -> list[dict]:
+        if isinstance(response, list):
+            return response
+        if isinstance(response, dict):
+            if "Details" in response and isinstance(response["Details"], list):
+                return response["Details"]
+            if "Positions" in response and isinstance(response["Positions"], list):
+                return response["Positions"]
+        return []
+
+    @staticmethod
+    def _get_hold_id(position: dict) -> Optional[str]:
+        for key in ("HoldID", "HoldId", "hold_id", "ID", "Id"):
+            if key in position and position[key]:
+                return str(position[key])
+        return None
+
+    @staticmethod
+    def _get_qty(position: dict) -> float:
+        for key in ("Qty", "HoldQty", "LeavesQty", "PositionQty"):
+            if key in position and position[key] is not None:
+                try:
+                    return float(position[key])
+                except (TypeError, ValueError):
+                    continue
+        return 0.0
+
+    @staticmethod
+    def _get_symbol(position: dict) -> Optional[str]:
+        for key in ("Symbol", "SymbolCode", "StockCode", "Code"):
+            value = position.get(key)
+            if value:
+                return str(value)
+        return None
+
+    @staticmethod
+    def _get_side(position: dict) -> Optional[int]:
+        for key in ("Side", "BuySell", "SideCode"):
+            value = position.get(key)
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
     @staticmethod
     def _find_order_payload(order_id: str, response: dict) -> dict:
         if not response:
@@ -525,8 +603,10 @@ class OrderRepository:
                     expire_day INTEGER,
                     front_order_type INTEGER,
                     close_position_id TEXT,
+                    close_position_order INTEGER,
                     close_positions TEXT,
                     price REAL,
+                    fund_type TEXT,
                     stop_trigger_price REAL,
                     stop_after_hit_order_type INTEGER,
                     stop_after_hit_price REAL,
@@ -550,11 +630,13 @@ class OrderRepository:
                     "deliv_type": "INTEGER",
                     "expire_day": "INTEGER",
                     "close_position_id": "TEXT",
+                    "close_position_order": "INTEGER",
                     "front_order_type": "INTEGER",
                     "stop_trigger_price": "REAL",
                     "stop_after_hit_order_type": "INTEGER",
                     "stop_after_hit_price": "REAL",
                     "stop_under_over": "INTEGER",
+                    "fund_type": "TEXT",
                 },
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id)")
@@ -595,10 +677,11 @@ class OrderRepository:
                     INSERT OR IGNORE INTO orders (
                         order_id, role, order_type, qty, symbol, exchange, side, security_type,
                         cash_margin, margin_trade_type, account_type, deliv_type, expire_day,
-                        front_order_type, symbol_code, time_in_force, close_position_id, price,
+                        front_order_type, symbol_code, time_in_force, close_position_id, close_position_order, price,
+                        fund_type,
                         stop_trigger_price, stop_after_hit_order_type, stop_after_hit_price,
                         stop_under_over, close_positions, filled_qty, status, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         order.order_id,
@@ -618,7 +701,9 @@ class OrderRepository:
                         order.symbol_code,
                         order.time_in_force,
                         order.close_position_id,
+                        order.close_position_order,
                         order.price,
+                        order.fund_type,
                         order.stop_trigger_price,
                         order.stop_after_hit_order_type,
                         order.stop_after_hit_price,
@@ -638,10 +723,11 @@ class OrderRepository:
                     INSERT OR IGNORE INTO orders (
                         order_id, role, order_type, qty, symbol, exchange, side, security_type,
                         cash_margin, margin_trade_type, account_type, deliv_type, expire_day,
-                        front_order_type, symbol_code, time_in_force, close_position_id, price,
+                        front_order_type, symbol_code, time_in_force, close_position_id, close_position_order, price,
+                        fund_type,
                         stop_trigger_price, stop_after_hit_order_type, stop_after_hit_price,
                         stop_under_over, close_positions, filled_qty, status, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         order.order_id,
@@ -661,7 +747,9 @@ class OrderRepository:
                         order.symbol_code,
                         order.time_in_force,
                         order.close_position_id,
+                        order.close_position_order,
                         order.price,
+                        order.fund_type,
                         order.stop_trigger_price,
                         order.stop_after_hit_order_type,
                         order.stop_after_hit_price,
@@ -966,6 +1054,8 @@ class AutoTrader:
                 stop_after_hit_price=order.stop_after_hit_price,
                 stop_under_over=order.stop_under_over,
                 close_positions=order.close_positions,
+                close_position_order=order.close_position_order,
+                fund_type=order.fund_type,
             )
             self.orders[replacement.role] = replacement
             replacement.place(self.broker, repository=self.repository)
@@ -995,6 +1085,8 @@ class AutoTrader:
             stop_after_hit_price=order.stop_after_hit_price,
             stop_under_over=order.stop_under_over,
             close_positions=order.close_positions,
+            close_position_order=order.close_position_order,
+            fund_type=order.fund_type,
         )
         self.orders[replacement.role] = replacement
         replacement.place(self.broker, repository=self.repository)
@@ -1036,6 +1128,8 @@ class AutoTrader:
             "time_in_force": self.entry_order.time_in_force,
             "close_position_id": self.entry_order.close_position_id,
             "close_positions": self.entry_order.close_positions,
+            "close_position_order": self.entry_order.close_position_order,
+            "fund_type": self.entry_order.fund_type,
         }
 def run_demo(
     poll_interval_sec: float = 0.5,

@@ -90,8 +90,10 @@ class LiveWorker(QThread):
             account_type=self.inputs.account_type,
             deliv_type=self.inputs.deliv_type,
             expire_day=self.inputs.expire_day,
+            close_position_order=self.inputs.close_position_order,
             price=entry_price,
             close_positions=self.inputs.close_positions,
+            fund_type=self.inputs.fund_type,
         )
 
         self.log_message.emit(

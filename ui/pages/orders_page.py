@@ -309,7 +309,15 @@ class OrdersPage(QWidget):
         close_positions_input.setPlaceholderText("例: HoldID,数量\n123456,100")
         close_positions_input.setMaximumHeight(72)
         advanced_layout.addRow("信用返済(ClosePositions)", close_positions_input)
-        
+
+        close_position_order_input = QSpinBox()
+        close_position_order_input.setRange(0, 99)
+        close_position_order_input.setValue(0)
+        advanced_layout.addRow("信用返済順序(ClosePositionOrder)", close_position_order_input)
+
+        fund_type_input = QLineEdit()
+        fund_type_input.setPlaceholderText("例: 11")
+        advanced_layout.addRow("資産区分(FundType)", fund_type_input)        
         order_type_input = QComboBox()
         order_type_input.addItems(["成行", "指値"])
         form.addRow("成行/価格指定", order_type_input)
@@ -393,6 +401,8 @@ class OrdersPage(QWidget):
             "deliv_type_input": deliv_type_input,
             "expire_day_input": expire_day_input,
             "close_positions_input": close_positions_input,
+            "close_position_order_input": close_position_order_input,
+            "fund_type_input": fund_type_input,
             "advanced_toggle": advanced_toggle,
             "advanced_group": advanced_group,
             "order_type_input": order_type_input,
@@ -501,6 +511,12 @@ class OrdersPage(QWidget):
         cash_margin_input: QComboBox,
     ) -> None:
         is_margin = cash_margin_input.currentData() == 2
+        advanced_toggle.setEnabled(is_margin)
+        if not is_margin:
+            advanced_toggle.setChecked(False)
+            advanced_group.setVisible(False)
+            return
+        advanced_group.setVisible(advanced_toggle.isChecked())
 
     def _localize_state(self, state: str) -> tuple[str, str]:
         key = state.upper() if state else "-"

@@ -264,6 +264,8 @@ class MainWindow(QMainWindow):
             side_code = input_set["side_input"].currentData()
             cash_margin = input_set["cash_margin_input"].currentData()
             close_positions = None
+            close_position_order = None
+            fund_type = None
             if (
                 input_set["advanced_toggle"].isChecked()
                 and input_set["advanced_group"].isVisible()
@@ -285,6 +287,12 @@ class MainWindow(QMainWindow):
                             continue
                         if hold_id:
                             close_positions.append({"HoldID": hold_id, "Qty": qty_value})
+                close_position_order_value = input_set["close_position_order_input"].value()
+                if close_position_order_value > 0:
+                    close_position_order = close_position_order_value
+                fund_type_text = input_set["fund_type_input"].text().strip()
+                if fund_type_text:
+                    fund_type = fund_type_text
             inputs.append(
                 TradeInputs(
                     symbol_code=input_set["symbol_input"].text().strip() or "N/A",
@@ -303,7 +311,9 @@ class MainWindow(QMainWindow):
                     account_type=account_type,
                     deliv_type=deliv_type,
                     expire_day=expire_day,
+                    close_position_order=close_position_order,
                     close_positions=close_positions,
+                    fund_type=fund_type,
                     poll_interval_sec=input_set["poll_interval_input"].value(),
                     fills_after_polls=input_set["fills_after_input"].value(),
                     force_exit_poll_interval_sec=self.settings_page.force_poll_interval_input.value(),

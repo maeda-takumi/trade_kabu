@@ -29,6 +29,7 @@ class LiveWorker(QThread):
         super().__init__(parent=parent)
         self.inputs = inputs
         self._stop_requested = False
+        self._error_emitted = False
 
     def stop(self) -> None:
         self._stop_requested = True
@@ -176,6 +177,8 @@ class LiveWorker(QThread):
             self.log_message.emit(f"[live] completed with state={trader.state.name}")
             self.state_changed.emit(trader.state.name)
             self._emit_exit_statuses(trader, last_exit_statuses)
+            if trader.state == AutoTraderState.ERROR and not self._error_emitted:
+                self._emit_error_state(phase, trader)
             self.finished_state.emit(trader.state.name)
         except RuntimeError as exc:
             self._emit_error(phase, exc)
@@ -210,5 +213,15 @@ class LiveWorker(QThread):
         self.log_message.emit(
             f"[live][error] {phase}で例外発生 ({exc_type}): {exc_message}"
         )
+        self._error_emitted = True
+        self.error_message.emit(f"実運用中にエラーが発生しました: {exc_message}")
         self.error_detail.emit(detail)
         self.finished_state.emit("ERROR")
+
+    def _emit_error_state(self, phase: str, trader: AutoTrader) -> None:
+        reason = trader.last_error_reason or "詳細情報がありません。"
+        detail = f"モード: 実運用\nフェーズ: {phase}\n理由: {reason}"
+        self.log_message.emit(f"[live][error] {phase}でエラー遷移: {reason}")
+        self._error_emitted = True
+        self.error_message.emit(f"実運用中にエラーが発生しました: {reason}")
+        self.error_detail.emit(detail)

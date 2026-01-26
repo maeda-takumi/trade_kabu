@@ -406,12 +406,17 @@ class MainWindow(QMainWindow):
         safe_detail = detail.strip() or "詳細情報がありません。"
         entry_detail = f"取引 #{row + 1}\n{safe_detail}"
         self.history_page.error_view.appendPlainText(entry_detail)
+        message = f"取引がエラー状態で終了しました。\n\n{entry_detail}"
+        self._error_messages[row] = message
+        if row in self._error_rows_shown:
+            return
+        self._error_rows_shown.add(row)
         QMessageBox.critical(
             self,
             "取引エラー",
-            f"取引がエラー状態で終了しました。\n\n{entry_detail}",
+            message,
         )
-        
+
     def _on_worker_error(self, row: int, message: str, mode_label: str) -> None:
         self._error_messages[row] = message
         if row in self._error_rows_shown:

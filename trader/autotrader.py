@@ -42,9 +42,11 @@ class AutoTrader:
         self._force_exit_started_at: Optional[float] = None
         self._last_force_exit_poll: Optional[float] = None
         self._confirmed_order_ids: set[str] = set()
+        self.last_error_reason: Optional[str] = None
 
-    def _enter_error_state(self) -> None:
+    def _enter_error_state(self, reason: str) -> None:
         """エラー状態へ遷移し、未約定注文を可能な限り取り消す。"""
+        self.last_error_reason = reason
         self.state = AutoTraderState.ERROR
         self.cancel_all_orders()
 
@@ -58,7 +60,7 @@ class AutoTrader:
     def start_trade(self, entry_order: Order, profit_price: float, loss_price: float) -> None:
         """取引を開始する。IDLEでない場合はERRORに遷移する。"""
         if self.state != AutoTraderState.IDLE:
-            self.state = AutoTraderState.ERROR
+            self._enter_error_state("取引開始時の状態がIDLEではありません。")
             return
         self._profit_price = profit_price
         self._loss_price = loss_price
@@ -79,8 +81,8 @@ class AutoTrader:
         if self.state == AutoTraderState.ERROR:
             return
         if status in (OrderStatus.REJECTED, OrderStatus.ERROR):
-            self._enter_error_state()
-            return
+            self._enter_error_state(f"注文が失敗しました。role={order.role.name}")
+
         # エントリーが約定したら利確/損切り注文を作る
         if order.role == OrderRole.ENTRY and status == OrderStatus.FILLED:
             self.state = AutoTraderState.ENTRY_FILLED
@@ -92,7 +94,7 @@ class AutoTrader:
             )
             other_order = self.orders.get(other_role)
             if other_order and other_order.status == OrderStatus.FILLED:
-                self._enter_error_state()
+                self._enter_error_state("利確/損切が同時約定しました。")
                 return
 
             self.cancel_other_exit_orders(order)
@@ -116,22 +118,22 @@ class AutoTrader:
     def create_exit_orders(self) -> None:
         """利確/損切り注文を作成して送信する。"""
         if not self.entry_order:
-            self.state = AutoTraderState.ERROR
+            self._enter_error_state("エントリー注文が未設定のため決済注文を作成できません。")
             return
         if self._profit_price is None or self._loss_price is None:
             # 利確/損切価格が未設定ならエラーにする
-            self.state = AutoTraderState.ERROR
+            self._enter_error_state("利確/損切価格が未設定です。")
             return
         exit_side = self._resolve_exit_side()
         if exit_side is None and not isinstance(self.broker, DemoBroker):
-            self.state = AutoTraderState.ERROR
+            self._enter_error_state("決済側の売買区分を判定できません。")
             return
         base_kwargs = self._build_exit_order_base(exit_side)
         if self.entry_order.cash_margin == 2:
             base_kwargs["margin_trade_type"] = 2
         stop_under_over = self._resolve_stop_under_over()
         if stop_under_over is None and not isinstance(self.broker, DemoBroker):
-            self.state = AutoTraderState.ERROR
+            self._enter_error_state("逆指値の判定方向を決定できません。")
             return
         # エントリー数量に合わせて両建ての出口注文を作る
         self.exit_profit_order = Order(
@@ -175,20 +177,20 @@ class AutoTrader:
                 if not success:
                     self.force_exit_market()
                     if self.state != AutoTraderState.FORCE_EXITING:
-                        self._enter_error_state()
+                        self._enter_error_state("決済注文のキャンセルに失敗しました。")
 
     def force_exit_market(self) -> None:
         """強制決済（成行）を実行する。"""
         if self.state in (AutoTraderState.IDLE, AutoTraderState.ENTRY_WAIT):
             # まだポジションがない段階での強制決済はエラー扱い
-            self.state = AutoTraderState.ERROR
+            self._enter_error_state("ポジション未成立のため成行決済を拒否しました。")
             return
         if self.state in (AutoTraderState.EXIT_FILLED, AutoTraderState.ERROR):
             # すでに終わっているかエラーなら何もしない
             return
         exit_side = self._resolve_exit_side()
         if exit_side is None and not isinstance(self.broker, DemoBroker):
-            self.state = AutoTraderState.ERROR
+            self._enter_error_state("成行決済の売買区分を判定できません。")
             return
         base_kwargs = self._build_exit_order_base(exit_side)
         exit_order = Order(
@@ -244,7 +246,7 @@ class AutoTrader:
             if now <= deadline_time:
                 self.force_exit_market()
             else:
-                self._enter_error_state()
+                self._enter_error_state("成行決済の期限を超過しました。")
 
     def _poll_active_orders(self) -> None:
         """アクティブな注文をポーリングし、状態遷移を処理する。"""
@@ -252,7 +254,7 @@ class AutoTrader:
         if self.state == AutoTraderState.FORCE_EXITING:
             # 強制決済が長引きすぎたらエラーにする
             if self._force_exit_started_at and now - self._force_exit_started_at > self.config.force_exit_max_duration_sec:
-                self.state = AutoTraderState.ERROR
+                self._enter_error_state("成行決済が規定時間を超過しました。")
                 return
             # 強制決済中は一定間隔でのみポーリング
             if self._last_force_exit_poll and now - self._last_force_exit_poll < self.config.force_exit_poll_interval_sec:
@@ -264,7 +266,7 @@ class AutoTrader:
                 continue
             status = order.poll_status(self.broker, repository=self.repository)
             if status in (OrderStatus.REJECTED, OrderStatus.ERROR):
-                self._enter_error_state()
+                self._enter_error_state(f"注文が失敗しました。role={order.role.name}")
                 return
             # 強制決済時に一部約定なら成行を出し直す
             if status == OrderStatus.PARTIAL:
@@ -310,7 +312,7 @@ class AutoTrader:
             replacement.place(self.broker, repository=self.repository)
             return True
         if not order.cancel(self.broker, repository=self.repository):
-            self._enter_error_state()
+            self._enter_error_state("部分約定後のキャンセルに失敗しました。")
             return True
         replacement = Order(
             role=order.role,

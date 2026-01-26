@@ -107,7 +107,7 @@ class OrderRepository:
                         fund_type,
                         stop_trigger_price, stop_after_hit_order_type, stop_after_hit_price,
                         stop_under_over, close_positions, filled_qty, status, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         order.order_id,
@@ -153,7 +153,7 @@ class OrderRepository:
                         fund_type,
                         stop_trigger_price, stop_after_hit_order_type, stop_after_hit_price,
                         stop_under_over, close_positions, filled_qty, status, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         order.order_id,

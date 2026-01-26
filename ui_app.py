@@ -282,6 +282,8 @@ class MainWindow(QMainWindow):
                         continue
                     if hold_id:
                         close_positions.append({"HoldID": hold_id, "Qty": qty_value})
+            close_position_order = input_set["close_position_order_input"].value() or None
+            fund_type = input_set["fund_type_input"].text().strip() or None
             inputs.append(
                 TradeInputs(
                     symbol_code=input_set["symbol_input"].text().strip() or "N/A",
@@ -300,7 +302,9 @@ class MainWindow(QMainWindow):
                     account_type=account_type,
                     deliv_type=deliv_type,
                     expire_day=expire_day,
+                    close_position_order=close_position_order,
                     close_positions=close_positions,
+                    fund_type=fund_type,
                     poll_interval_sec=input_set["poll_interval_input"].value(),
                     fills_after_polls=input_set["fills_after_input"].value(),
                     force_exit_poll_interval_sec=self.settings_page.force_poll_interval_input.value(),

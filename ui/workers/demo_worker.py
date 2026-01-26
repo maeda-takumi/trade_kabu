@@ -100,87 +100,109 @@ class DemoWorker(QThread):
             time.sleep(0.5)
 
     def run(self) -> None:
-        config = AutoTraderConfig(
-            force_exit_poll_interval_sec=self.inputs.force_exit_poll_interval_sec,
-            force_exit_max_duration_sec=self.inputs.force_exit_max_duration_sec,
-            force_exit_start_before_close_min=self.inputs.force_exit_start_before_close_min,
-            force_exit_deadline_before_close_min=self.inputs.force_exit_deadline_before_close_min,
-            force_exit_use_market_close=self.inputs.force_exit_use_market_close,
-            market_close_hour=self.inputs.market_close_hour,
-            market_close_minute=self.inputs.market_close_minute,
-        )
-        broker = DemoBroker(fills_after_polls=self.inputs.fills_after_polls)
-        trader = AutoTrader(broker, config=config)      
-        entry_price = (
-            self.inputs.entry_price if self.inputs.entry_order_type == "LIMIT" else None
-        )
-        entry_order = self.build_entry_order(self.inputs, entry_price)
-
-        self.log_message.emit(
-            "[demo] setup: "
-            f"symbol={self.inputs.symbol_code}, exchange={self.inputs.exchange}, qty={self.inputs.qty}, "
-            f"side={self.inputs.side_label}, order_type={self.inputs.entry_order_type}, "
-            f"entry_price={self.inputs.entry_price}, profit={self.inputs.profit_price}, "
-            f"loss={self.inputs.loss_price}"
-        )
-
-        if self.inputs.schedule_type == "予約" and self.inputs.scheduled_epoch:
-            scheduled_at = datetime.fromtimestamp(self.inputs.scheduled_epoch)
-            self.log_message.emit(
-                f"[demo] scheduled start at {scheduled_at:%Y-%m-%d %H:%M}"
+        phase = "初期化"
+        try:
+            config = AutoTraderConfig(
+                force_exit_poll_interval_sec=self.inputs.force_exit_poll_interval_sec,
+                force_exit_max_duration_sec=self.inputs.force_exit_max_duration_sec,
+                force_exit_start_before_close_min=self.inputs.force_exit_start_before_close_min,
+                force_exit_deadline_before_close_min=self.inputs.force_exit_deadline_before_close_min,
+                force_exit_use_market_close=self.inputs.force_exit_use_market_close,
+                market_close_hour=self.inputs.market_close_hour,
+                market_close_minute=self.inputs.market_close_minute,
             )
-            if not self._wait_until_scheduled():
-                self.finished_state.emit("CANCELED")
-                return
-        else:
-            self.log_message.emit("[demo] start immediately")
+            broker = DemoBroker(fills_after_polls=self.inputs.fills_after_polls)
+            trader = AutoTrader(broker, config=config)
+            phase = "エントリー注文準備"
+            entry_price = (
+                self.inputs.entry_price
+                if self.inputs.entry_order_type == "LIMIT"
+                else None
+            )
+            entry_order = self.build_entry_order(self.inputs, entry_price)
 
-        self.log_message.emit(f"[demo] state={trader.state.name} -> start_trade")
-        trader.start_trade(
-            entry_order,
-            profit_price=self.inputs.profit_price,
-            loss_price=self.inputs.loss_price,
-        )
-        last_state = trader.state
-        self.state_changed.emit(trader.state.name)
-        self.log_message.emit(f"[demo] state={trader.state.name}")
-        self._emit_exit_statuses(trader, None)
+            self.log_message.emit(
+                "[demo] setup: "
+                f"symbol={self.inputs.symbol_code}, exchange={self.inputs.exchange}, qty={self.inputs.qty}, "
+                f"side={self.inputs.side_label}, order_type={self.inputs.entry_order_type}, "
+                f"entry_price={self.inputs.entry_price}, profit={self.inputs.profit_price}, "
+                f"loss={self.inputs.loss_price}"
+            )
 
-        stopping = False
-        last_exit_statuses: Optional[tuple[str, str]] = None
-        while trader.state not in (AutoTraderState.EXIT_FILLED, AutoTraderState.ERROR):
-            if self._stop_requested:
-                self.log_message.emit("[demo] stop requested by user")
-                if trader.state in (AutoTraderState.IDLE, AutoTraderState.ENTRY_WAIT):
-                    trader.cancel_all_orders()
-                    self.state_changed.emit(trader.state.name)
+            if self.inputs.schedule_type == "予約" and self.inputs.scheduled_epoch:
+                phase = "予約待機"
+                scheduled_at = datetime.fromtimestamp(self.inputs.scheduled_epoch)
+                self.log_message.emit(
+                    f"[demo] scheduled start at {scheduled_at:%Y-%m-%d %H:%M}"
+                )
+                if not self._wait_until_scheduled():
                     self.finished_state.emit("CANCELED")
                     return
-                if not stopping:
-                    trader.force_exit_market()
-                    stopping = True
-                    if trader.state != last_state:
-                        self.log_message.emit(
-                            f"[demo] state={last_state.name} -> {trader.state.name}"
-                        )
-                        last_state = trader.state
-                        self.state_changed.emit(trader.state.name)
-            trader.poll()
-            if trader.state != last_state:
-                self.log_message.emit(
-                    f"[demo] state={last_state.name} -> {trader.state.name}"
-                )
-                last_state = trader.state
-                self.state_changed.emit(trader.state.name)
-            current_exit_statuses = self._emit_exit_statuses(trader, last_exit_statuses)
-            if current_exit_statuses is not None:
-                last_exit_statuses = current_exit_statuses
-            time.sleep(self.inputs.poll_interval_sec)
+            else:
+                self.log_message.emit("[demo] start immediately")
 
-        self.log_message.emit(f"[demo] completed with state={trader.state.name}")
-        self.state_changed.emit(trader.state.name)
-        self._emit_exit_statuses(trader, last_exit_statuses)
-        self.finished_state.emit(trader.state.name)
+            phase = "エントリー注文送信"
+            self.log_message.emit(f"[demo] state={trader.state.name} -> start_trade")
+            trader.start_trade(
+                entry_order,
+                profit_price=self.inputs.profit_price,
+                loss_price=self.inputs.loss_price,
+            )
+            last_state = trader.state
+            self.state_changed.emit(trader.state.name)
+            self.log_message.emit(f"[demo] state={trader.state.name}")
+            self._emit_exit_statuses(trader, None)
+
+            stopping = False
+            last_exit_statuses: Optional[tuple[str, str]] = None
+            while trader.state not in (
+                AutoTraderState.EXIT_FILLED,
+                AutoTraderState.ERROR,
+            ):
+                if self._stop_requested:
+                    phase = "停止処理"
+                    self.log_message.emit("[demo] stop requested by user")
+                    if trader.state in (
+                        AutoTraderState.IDLE,
+                        AutoTraderState.ENTRY_WAIT,
+                    ):
+                        trader.cancel_all_orders()
+                        self.state_changed.emit(trader.state.name)
+                        self.finished_state.emit("CANCELED")
+                        return
+                    if not stopping:
+                        trader.force_exit_market()
+                        stopping = True
+                        if trader.state != last_state:
+                            self.log_message.emit(
+                                f"[demo] state={last_state.name} -> {trader.state.name}"
+                            )
+                            last_state = trader.state
+                            self.state_changed.emit(trader.state.name)
+                phase = "注文ポーリング"
+                trader.poll()
+                if trader.state != last_state:
+                    self.log_message.emit(
+                        f"[demo] state={last_state.name} -> {trader.state.name}"
+                    )
+                    last_state = trader.state
+                    self.state_changed.emit(trader.state.name)
+                current_exit_statuses = self._emit_exit_statuses(
+                    trader, last_exit_statuses
+                )
+                if current_exit_statuses is not None:
+                    last_exit_statuses = current_exit_statuses
+                time.sleep(self.inputs.poll_interval_sec)
+
+            phase = "完了処理"
+            self.log_message.emit(f"[demo] completed with state={trader.state.name}")
+            self.state_changed.emit(trader.state.name)
+            self._emit_exit_statuses(trader, last_exit_statuses)
+            self.finished_state.emit(trader.state.name)
+        except RuntimeError as exc:
+            self._emit_error(phase, exc)
+        except Exception as exc:
+            self._emit_error(phase, exc)
 
     def _emit_exit_statuses(
         self, trader: AutoTrader, previous: Optional[tuple[str, str]]
@@ -197,3 +219,10 @@ class DemoWorker(QThread):
         if current != previous:
             self.exit_status_changed.emit(*current)
         return current
+
+    def _emit_error(self, phase: str, exc: Exception) -> None:
+        exc_type = type(exc).__name__
+        self.log_message.emit(
+            f"[demo][error] {phase}で例外発生 ({exc_type}): {exc}"
+        )
+        self.finished_state.emit("ERROR")

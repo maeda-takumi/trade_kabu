@@ -7,7 +7,7 @@ from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
 
-from autotrader import (
+from trader import (
     AutoTrader,
     AutoTraderConfig,
     AutoTraderState,

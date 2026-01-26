@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from autotrader import KabuStationBroker
+from trader import KabuStationBroker
 from ui.widgets.card import Card
 
 

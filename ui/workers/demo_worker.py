@@ -31,10 +31,10 @@ class TradeInputs:
     side_label: str
     side_code: int
     cash_margin: int
-    security_type: Optional[int]
-    account_type: Optional[int]
-    deliv_type: Optional[int]
-    expire_day: Optional[int]
+    security_type: int
+    account_type: int
+    deliv_type: int
+    expire_day: int
     close_position_order: Optional[int]
     close_positions: Optional[list[dict]]
     fund_type: Optional[str]

@@ -276,48 +276,15 @@ class OrdersPage(QWidget):
         cash_margin_input.addItem("信用", 2)
         form.addRow("現物/信用区分", cash_margin_input)
 
-        security_type_input = QSpinBox()
-        security_type_input.setRange(0, 99)
-        security_type_input.setValue(0)
-        form.addRow("商品区分コード(SecurityType)", security_type_input)
-
-        account_type_input = QSpinBox()
-        account_type_input.setRange(0, 99)
-        account_type_input.setValue(0)
-        form.addRow("口座種別(AccountType)", account_type_input)
-
-        deliv_type_input = QSpinBox()
-        deliv_type_input.setRange(0, 99)
-        deliv_type_input.setValue(0)
-        form.addRow("受渡区分(DelivType)", deliv_type_input)
-
-        expire_day_input = QSpinBox()
-        expire_day_input.setRange(0, 99999999)
-        expire_day_input.setValue(0)
-        form.addRow("有効期限(ExpireDay)", expire_day_input)
-
-        advanced_toggle = QCheckBox("詳細設定を表示")
-        form.addRow("", advanced_toggle)
-
-        advanced_group = QGroupBox("詳細設定")
-        advanced_group.setVisible(False)
-        advanced_layout = QFormLayout(advanced_group)
-        advanced_layout.setHorizontalSpacing(16)
-        advanced_layout.setVerticalSpacing(10)
-
         close_positions_input = QPlainTextEdit()
         close_positions_input.setPlaceholderText("例: HoldID,数量\n123456,100")
         close_positions_input.setMaximumHeight(72)
-        advanced_layout.addRow("信用返済(ClosePositions)", close_positions_input)
 
         close_position_order_input = QSpinBox()
         close_position_order_input.setRange(0, 99)
         close_position_order_input.setValue(0)
-        advanced_layout.addRow("信用返済順序(ClosePositionOrder)", close_position_order_input)
-
         fund_type_input = QLineEdit()
-        fund_type_input.setPlaceholderText("例: 11")
-        advanced_layout.addRow("資産区分(FundType)", fund_type_input)        
+        fund_type_input.setPlaceholderText("例: 11")     
         order_type_input = QComboBox()
         order_type_input.addItems(["成行", "指値"])
         form.addRow("成行/価格指定", order_type_input)
@@ -351,26 +318,15 @@ class OrdersPage(QWidget):
         form.addRow("実行日時", schedule_time_input)
 
         layout.addLayout(form)
-        layout.addWidget(advanced_group)
 
         order_type_input.currentTextChanged.connect(
             lambda value, target=entry_price_input: self._toggle_entry_price(target, value)
         )
-        cash_margin_input.currentIndexChanged.connect(
-            lambda _, target=advanced_group, toggle=advanced_toggle, source=cash_margin_input: (
-                self._toggle_advanced_settings(target, toggle, source),
-            )
-        )
-        advanced_toggle.stateChanged.connect(
-            lambda _, target=advanced_group, toggle=advanced_toggle, cash=cash_margin_input: (
-                self._toggle_advanced_settings(target, toggle, cash)
-            )
-        )
+
         schedule_type_input.currentTextChanged.connect(
             lambda value, target=schedule_time_input: self._toggle_schedule(target, value)
         )
         self._toggle_entry_price(entry_price_input, order_type_input.currentText())
-        self._toggle_advanced_settings(advanced_group, advanced_toggle, cash_margin_input)
         self._toggle_schedule(schedule_time_input, schedule_type_input.currentText())
 
         demo_controls = QGroupBox("デモ実行パラメータ")
@@ -396,15 +352,9 @@ class OrdersPage(QWidget):
             "qty_input": qty_input,
             "side_input": side_input,
             "cash_margin_input": cash_margin_input,
-            "security_type_input": security_type_input,
-            "account_type_input": account_type_input,
-            "deliv_type_input": deliv_type_input,
-            "expire_day_input": expire_day_input,
             "close_positions_input": close_positions_input,
             "close_position_order_input": close_position_order_input,
             "fund_type_input": fund_type_input,
-            "advanced_toggle": advanced_toggle,
-            "advanced_group": advanced_group,
             "order_type_input": order_type_input,
             "entry_price_input": entry_price_input,
             "profit_price_input": profit_price_input,
@@ -504,20 +454,6 @@ class OrdersPage(QWidget):
         is_reserved = value == "予約"
         schedule_time_input.setVisible(is_reserved)
 
-    def _toggle_advanced_settings(
-        self,
-        advanced_group: QGroupBox,
-        advanced_toggle: QCheckBox,
-        cash_margin_input: QComboBox,
-    ) -> None:
-        is_margin = cash_margin_input.currentData() == 2
-        advanced_toggle.setEnabled(is_margin)
-        if not is_margin:
-            advanced_toggle.setChecked(False)
-            advanced_group.setVisible(False)
-            return
-        advanced_group.setVisible(advanced_toggle.isChecked())
-
     def _localize_state(self, state: str) -> tuple[str, str]:
         key = state.upper() if state else "-"
         label = STATUS_LABELS.get(key, state if state else "-")
@@ -555,10 +491,6 @@ class OrdersPage(QWidget):
                 self.qty_input = inputs["qty_input"]
                 self.side_input = inputs["side_input"]
                 self.cash_margin_input = inputs["cash_margin_input"]
-                self.security_type_input = inputs["security_type_input"]
-                self.account_type_input = inputs["account_type_input"]
-                self.deliv_type_input = inputs["deliv_type_input"]
-                self.expire_day_input = inputs["expire_day_input"]         
                 self.order_type_input = inputs["order_type_input"]
                 self.entry_price_input = inputs["entry_price_input"]
                 self.profit_price_input = inputs["profit_price_input"]

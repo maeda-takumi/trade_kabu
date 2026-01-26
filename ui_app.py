@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtWidgets import QApplication, QLabel, QHBoxLayout, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QHBoxLayout,
+    QMainWindow,
+    QMessageBox,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ui.pages.history_page import HistoryPage
 from ui.pages.orders_page import OrdersPage
@@ -17,6 +26,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AutoTrader Demo UI")
         self.setMinimumSize(1900, 950)
         self.workers: list[DemoWorker] = []
+        self._error_messages: dict[int, str] = {}
+        self._error_rows_shown: set[int] = set()
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -327,8 +338,11 @@ class MainWindow(QMainWindow):
             return
         inputs_list = self._collect_inputs()
         self.workers.clear()
+        self._error_messages.clear()
+        self._error_rows_shown.clear()
         mode = self.orders_page.mode_input.currentText()
         is_live = mode == "実運用"
+        mode_label = "実運用" if is_live else "デモ"
         rows = []
         for index, inputs in enumerate(inputs_list, start=1):
             rows.append(
@@ -355,7 +369,15 @@ class MainWindow(QMainWindow):
                     row, profit, loss
                 )
             )
+            worker.error_message.connect(
+                lambda message, row=index, label=mode_label: self._on_worker_error(
+                    row, message, label
+                )
+            )
             worker.log_message.connect(self.history_page.append_log)
+            worker.error_detail.connect(
+                lambda detail, row=index: self._handle_error_detail(row, detail)
+            )
             worker.start()
             self.workers.append(worker)
 
@@ -369,10 +391,33 @@ class MainWindow(QMainWindow):
 
     def _on_demo_finished(self, row: int, state: str) -> None:
         self.orders_page.update_final_row(row, state)
+        if state == "ERROR" and row not in self._error_rows_shown:
+            message = self._error_messages.get(
+                row,
+                "取引がエラー状態で終了しました。",
+            )
+            self._error_rows_shown.add(row)
+            QMessageBox.warning(self, "取引エラー", message)
         if all(not worker.isRunning() for worker in self.workers):
             self.orders_page.start_button.setEnabled(True)
             self.orders_page.stop_button.setEnabled(False)
 
+    def _handle_error_detail(self, row: int, detail: str) -> None:
+        safe_detail = detail.strip() or "詳細情報がありません。"
+        entry_detail = f"取引 #{row + 1}\n{safe_detail}"
+        self.history_page.error_view.appendPlainText(entry_detail)
+        QMessageBox.critical(
+            self,
+            "取引エラー",
+            f"取引がエラー状態で終了しました。\n\n{entry_detail}",
+        )
+        
+    def _on_worker_error(self, row: int, message: str, mode_label: str) -> None:
+        self._error_messages[row] = message
+        if row in self._error_rows_shown:
+            return
+        self._error_rows_shown.add(row)
+        QMessageBox.critical(self, f"{mode_label}エラー", message)
 
 def main() -> None:
     app = QApplication(sys.argv)

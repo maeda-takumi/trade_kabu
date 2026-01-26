@@ -19,9 +19,11 @@ from ui.workers.demo_worker import TradeInputs
 
 class LiveWorker(QThread):
     log_message = Signal(str)
+    error_message = Signal(str)
     state_changed = Signal(str)
     exit_status_changed = Signal(str, str)
     finished_state = Signal(str)
+    error_detail = Signal(str)
 
     def __init__(self, inputs: TradeInputs, parent: Optional[object] = None) -> None:
         super().__init__(parent=parent)
@@ -198,7 +200,15 @@ class LiveWorker(QThread):
 
     def _emit_error(self, phase: str, exc: Exception) -> None:
         exc_type = type(exc).__name__
-        self.log_message.emit(
-            f"[live][error] {phase}で例外発生 ({exc_type}): {exc}"
+        exc_message = str(exc).strip() or "(メッセージなし)"
+        detail = (
+            "モード: 実運用\n"
+            f"フェーズ: {phase}\n"
+            f"例外: {exc_type}\n"
+            f"メッセージ: {exc_message}"
         )
+        self.log_message.emit(
+            f"[live][error] {phase}で例外発生 ({exc_type}): {exc_message}"
+        )
+        self.error_detail.emit(detail)
         self.finished_state.emit("ERROR")

@@ -110,7 +110,7 @@ class DemoWorker(QThread):
                 force_exit_max_duration_sec=self.inputs.force_exit_max_duration_sec,
                 force_exit_start_before_close_min=self.inputs.force_exit_start_before_close_min,
                 force_exit_deadline_before_close_min=self.inputs.force_exit_deadline_before_close_min,
-                force_exit_use_market_close=self.inputs.force_exit_use_market_close,
+                force_exit_use_market_close=False,
                 market_close_hour=self.inputs.market_close_hour,
                 market_close_minute=self.inputs.market_close_minute,
             )
